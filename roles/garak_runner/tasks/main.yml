@@ -1,0 +1,302 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: garak_runner
+#
+# Что делает роль:
+# 1. Проверяет наличие python3.
+# 2. Проверяет наличие python3 -m venv.
+# 3. Создает каталоги под Garak.
+# 4. Создает отдельный Python virtual environment.
+# 5. Обновляет pip/setuptools/wheel внутри venv.
+# 6. Устанавливает пакет garak.
+# 7. Проверяет, что garak запускается и показывает help/version.
+# 8. Создает helper-скрипт для запуска Garak против Ollama.
+# ============================================================
+# ------------------------------------------------------------
+# Определяем, какой Python использовать для Garak.
+# Можно использовать либо отдельный Python 3.11 из роли
+# python_runtime, либо системный python3.
+# ------------------------------------------------------------
+- name: Define Python binary for Garak runtime
+  ansible.builtin.set_fact:
+    garak_runner_python_binary: >-
+      {{
+        garak_runner_custom_python_binary
+        if (garak_runner_use_custom_python | bool)
+        else garak_runner_system_python_binary
+      }}
+  tags:
+    - garak
+    - validation
+    - prereq
+# ------------------------------------------------------------
+# Проверяем наличие python3.
+# Предыдущая базовая роль должна была его установить,
+# но здесь мы явно убеждаемся, что он есть.
+# ------------------------------------------------------------
+- name: Validate configured Python availability before Garak installation
+  ansible.builtin.command:
+    argv:
+      - "{{ garak_runner_python_binary }}"
+      - --version
+  register: garak_runner_python3_check
+  changed_when: false
+  tags:
+    - garak
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверяем наличие модуля venv.
+# Он нужен, потому что Garak мы ставим не в system Python,
+# а в отдельное виртуальное окружение.
+# ------------------------------------------------------------
+- name: Validate configured Python venv module availability
+  ansible.builtin.command:
+    argv:
+      - "{{ garak_runner_python_binary }}"
+      - -m
+      - venv
+      - --help
+  register: garak_runner_venv_check
+  changed_when: false
+  tags:
+    - garak
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверяем доступность Ollama API.
+# Это не строго обязательно для самой установки Garak,
+# но полезно, потому что роль готовит окружение именно
+# для тестирования уже развернутого LLM endpoint.
+# ------------------------------------------------------------
+- name: Check Ollama API availability before preparing Garak environment
+  ansible.builtin.uri:
+    url: "{{ garak_runner_ollama_base_url }}/api/tags"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 10
+  register: garak_runner_ollama_api_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - garak
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Создаем базовый каталог Garak.
+# ------------------------------------------------------------
+- name: Ensure Garak base directory exists
+  ansible.builtin.file:
+    path: "{{ garak_runner_base_dir }}"
+    state: directory
+    owner: "{{ garak_runner_owner }}"
+    group: "{{ garak_runner_group }}"
+    mode: "0755"
+  tags:
+    - garak
+    - filesystem
+
+# ------------------------------------------------------------
+# Создаем каталог для отчетов Garak.
+# ------------------------------------------------------------
+- name: Ensure Garak reports directory exists
+  ansible.builtin.file:
+    path: "{{ garak_runner_reports_dir }}"
+    state: directory
+    owner: "{{ garak_runner_owner }}"
+    group: "{{ garak_runner_group }}"
+    mode: "0755"
+  tags:
+    - garak
+    - filesystem
+    - reports
+
+# ------------------------------------------------------------
+# Создаем каталог для helper-скриптов.
+# ------------------------------------------------------------
+- name: Ensure Garak bin directory exists
+  ansible.builtin.file:
+    path: "{{ garak_runner_bin_dir }}"
+    state: directory
+    owner: "{{ garak_runner_owner }}"
+    group: "{{ garak_runner_group }}"
+    mode: "0755"
+  tags:
+    - garak
+    - filesystem
+    - scripts
+
+# ------------------------------------------------------------
+# Проверяем, существует ли уже venv.
+# Это поможет сделать роль идемпотентной.
+# ------------------------------------------------------------
+- name: Check whether Garak virtual environment already exists
+  ansible.builtin.stat:
+    path: "{{ garak_runner_venv_dir }}/bin/activate"
+  register: garak_runner_venv_stat
+  tags:
+    - garak
+    - venv
+
+# ------------------------------------------------------------
+# Создаем venv только если его еще нет.
+# ------------------------------------------------------------
+- name: Create Garak virtual environment
+  ansible.builtin.command:
+    argv:
+      - "{{ garak_runner_python_binary }}"
+      - -m
+      - venv
+      - "{{ garak_runner_venv_dir }}"
+  when: not garak_runner_venv_stat.stat.exists
+  register: garak_runner_venv_create
+  changed_when: true
+  tags:
+    - garak
+    - venv
+# ------------------------------------------------------------
+# Cоздание каталога кэша
+# ------------------------------------------------------------
+- name: Ensure pip cache directory for Garak exists
+  ansible.builtin.file:
+    path: "{{ garak_runner_pip_cache_dir }}"
+    state: directory
+    owner: "{{ garak_runner_owner }}"
+    group: "{{ garak_runner_group }}"
+    mode: "0755"
+  tags:
+    - garak
+    - pip
+    - cache
+# ------------------------------------------------------------
+# Обновляем pip/setuptools/wheel внутри venv.
+# Это полезно для более надежной установки Python-пакетов.
+# ------------------------------------------------------------
+- name: Upgrade pip, setuptools and wheel inside virtual environment
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest
+    virtualenv: "{{ garak_runner_venv_dir }}"
+    virtualenv_command: "{{ garak_runner_python_binary }} -m venv"
+  environment:
+    PIP_CACHE_DIR: "{{ garak_runner_pip_cache_dir }}"
+  when: garak_runner_upgrade_pip_stack | bool
+  tags:
+    - garak
+    - pip
+    - venv
+# ------------------------------------------------------------
+# Небольшой дебаг перед установкой.
+# ------------------------------------------------------------
+- name: Show Garak installation settings
+  ansible.builtin.debug:
+    msg:
+      - "Garak package spec: {{ garak_runner_package_spec }}"
+      - "Python binary: {{ garak_runner_python_binary }}"
+      - "Virtualenv: {{ garak_runner_venv_dir }}"
+      - "PIP cache dir: {{ garak_runner_pip_cache_dir }}"
+  tags:
+    - garak
+    - pip
+    - install
+# ------------------------------------------------------------
+# Устанавливаем Garak внутрь venv.
+# pip-модуль Ansible умеет работать с virtualenv напрямую,
+# поэтому это чище и надежнее, чем raw shell команды.
+# ------------------------------------------------------------
+- name: Install Garak inside virtual environment
+  ansible.builtin.pip:
+    name: "{{ garak_runner_package_spec }}"
+    state: present
+    virtualenv: "{{ garak_runner_venv_dir }}"
+    virtualenv_command: "{{ garak_runner_python_binary }} -m venv"
+  environment:
+    PIP_CACHE_DIR: "{{ garak_runner_pip_cache_dir }}"
+  tags:
+    - garak
+    - pip
+    - install
+
+# ------------------------------------------------------------
+# Проверяем, что бинарник garak появился в venv.
+# ------------------------------------------------------------
+- name: Check Garak executable inside virtual environment
+  ansible.builtin.stat:
+    path: "{{ garak_runner_venv_dir }}/bin/garak"
+  register: garak_runner_binary_stat
+  tags:
+    - garak
+    - validation
+
+# ------------------------------------------------------------
+# Явно убеждаемся, что бинарник существует.
+# ------------------------------------------------------------
+- name: Assert Garak executable exists
+  ansible.builtin.assert:
+    that:
+      - garak_runner_binary_stat.stat.exists
+    fail_msg: >-
+      Garak executable was not found in virtual environment.
+      Check Python/pip installation and Garak package installation logs.
+    success_msg: >-
+      Garak executable is present in virtual environment.
+  tags:
+    - garak
+    - validation
+
+# ------------------------------------------------------------
+# Базовая smoke-проверка через --help.
+# Это безопаснее, чем сразу запускать полноценный scan.
+# ------------------------------------------------------------
+- name: Validate Garak CLI help output
+  ansible.builtin.command:
+    argv:
+      - "{{ garak_runner_venv_dir }}/bin/garak"
+      - --help
+  register: garak_runner_help_check
+  changed_when: false
+  tags:
+    - garak
+    - validation
+    - smoke_test
+
+# ------------------------------------------------------------
+# Создаем helper-скрипт для ручного запуска Garak против Ollama.
+# Это не обязательная часть, но очень полезная для дальнейшей работы
+# и для людей, которые будут читать проект.
+# ------------------------------------------------------------
+- name: Render helper script for running Garak against Ollama
+  ansible.builtin.template:
+    src: run_garak_ollama.sh.j2
+    dest: "{{ garak_runner_helper_script_path }}"
+    owner: "{{ garak_runner_owner }}"
+    group: "{{ garak_runner_group }}"
+    mode: "0755"
+  when: garak_runner_create_helper_script | bool
+  tags:
+    - garak
+    - scripts
+
+# ------------------------------------------------------------
+# Финальный понятный вывод.
+# ------------------------------------------------------------
+- name: Show final Garak environment validation output
+  ansible.builtin.debug:
+    msg:
+      - "Garak environment has been prepared successfully."
+      - "Base directory: {{ garak_runner_base_dir }}"
+      - "Virtual environment: {{ garak_runner_venv_dir }}"
+      - "Reports directory: {{ garak_runner_reports_dir }}"
+      - "Helper script: {{ garak_runner_helper_script_path if garak_runner_create_helper_script else 'disabled' }}"
+      - "Ollama API availability check status: {{ 'reachable' if garak_runner_ollama_api_check.status is defined and garak_runner_ollama_api_check.status == 200 else 'not confirmed during this run' }}"
+  tags:
+    - garak
+    - validation

@@ -1,0 +1,12 @@
+---
+# ============================================================
+# handlers/main.yml
+# Handler'ы роли docker_engine.
+# ============================================================
+
+- name: Restart docker service
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+    daemon_reload: true
+  listen: docker_engine_restart_docker

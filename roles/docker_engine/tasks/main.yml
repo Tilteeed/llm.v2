@@ -1,0 +1,335 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: docker_engine
+#
+# Что делает роль:
+# 1. Проверяет, что ОС — Ubuntu.
+# 2. Проверяет сетевую доступность до Docker repo URL.
+# 3. Ставит пакеты-предпосылки.
+# 4. Удаляет старые конфликтующие Docker-пакеты.
+# 5. Создает каталог для ключей apt.
+# 6. Загружает официальный GPG-ключ Docker.
+# 7. Добавляет официальный Docker apt repository.
+# 8. Обновляет apt cache.
+# 9. Ставит Docker Engine и сопутствующие пакеты.
+# 10. Проверяет наличие группы docker.
+# 11. Включает и запускает сервис Docker.
+# 12. Добавляет существующих пользователей в группу docker.
+# 13. Проверяет docker version / docker info.
+# 14. Опционально запускает hello-world для smoke test.
+# ============================================================
+
+# ------------------------------------------------------------
+# Safety check: роль написана под Ubuntu.
+# ------------------------------------------------------------
+- name: Fail if target host is not Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+    fail_msg: >-
+      This role supports Ubuntu only.
+      Current distribution: {{ ansible_distribution }}
+    success_msg: >-
+      Ubuntu detected. Continuing with Docker installation.
+  tags:
+    - docker
+    - validation
+    #- always
+
+# ------------------------------------------------------------
+# Небольшая проверка сетевой доступности официального Docker repo.
+# Это не гарантирует идеальную сеть, но помогает быстро понять,
+# не сломаны ли DNS/маршрутизация/выход в интернет.
+#
+# uri модуль умеет выполнять HTTP(S)-запросы.
+# Мы не падаем мгновенно из-за 301/302, а просто проверяем, что
+# есть ответ от удаленной стороны.
+# ------------------------------------------------------------
+- name: Check network access to Docker repository endpoint
+  ansible.builtin.uri:
+    url: https://download.docker.com/linux/ubuntu/
+    method: GET
+    return_content: false
+    status_code: [200, 301, 302, 403]
+    timeout: 20
+  register: docker_engine_repo_connectivity
+  changed_when: false
+  tags:
+    - docker
+    - network
+    - validation
+
+# ------------------------------------------------------------
+# Ставим пакеты-предпосылки.
+# Они нужны для работы с HTTPS apt-репозиториями и ключами.
+# ------------------------------------------------------------
+- name: Install prerequisite packages for Docker repository setup
+  ansible.builtin.apt:
+    name: "{{ docker_engine_prerequisite_packages }}"
+    state: present
+    update_cache: true
+  tags:
+    - docker
+    - packages
+
+# ------------------------------------------------------------
+# Опционально удаляем старые/конфликтующие пакеты Docker.
+# Это полезно, чтобы не смешивать docker.io из Ubuntu и docker-ce
+# из официального репозитория Docker.
+# ------------------------------------------------------------
+- name: Remove legacy/conflicting Docker packages
+  ansible.builtin.apt:
+    name: "{{ docker_engine_legacy_packages }}"
+    state: absent
+    purge: true
+    autoremove: true
+  when: docker_engine_remove_legacy_packages | bool
+  tags:
+    - docker
+    - packages
+    - cleanup
+
+# ------------------------------------------------------------
+# Создаем каталог для apt keyrings.
+# На современных Ubuntu принято хранить ключи репозиториев здесь.
+# ------------------------------------------------------------
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - docker
+    - repo
+
+# ------------------------------------------------------------
+# Загружаем официальный GPG-ключ Docker.
+# get_url скачивает файл напрямую на целевой хост.
+# ------------------------------------------------------------
+- name: Download official Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+    force: true
+  tags:
+    - docker
+    - repo
+
+# ------------------------------------------------------------
+# Добавляем официальный apt repository Docker.
+# Используем переменные ansible_architecture и
+# ansible_distribution_release, чтобы правильно собрать строку repo.
+#
+# Для Ubuntu 24.04 codename обычно будет "noble".
+# apt_repository — стандартный способ управлять apt sources list. 
+# ------------------------------------------------------------
+- name: Add official Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'amd64' if ansible_architecture in ['x86_64', 'amd64'] else ansible_architecture }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_distribution_release }} stable
+    state: present
+    filename: docker
+    update_cache: true
+  tags:
+    - docker
+    - repo
+
+# ------------------------------------------------------------
+# Отдельно обновляем apt cache после добавления репозитория,
+# чтобы гарантированно увидеть свежие Docker-пакеты.
+# ------------------------------------------------------------
+- name: Update apt cache after adding Docker repository
+  ansible.builtin.apt:
+    update_cache: true
+  tags:
+    - docker
+    - repo
+    - packages
+
+# ------------------------------------------------------------
+# Ставим Docker Engine и связанные пакеты из официального репозитория.
+# Здесь же ставится docker compose plugin.
+# ------------------------------------------------------------
+- name: Install Docker Engine packages
+  ansible.builtin.apt:
+    name: "{{ docker_engine_packages }}"
+    state: present
+  notify: docker_engine_restart_docker
+  tags:
+    - docker
+    - packages
+
+# ------------------------------------------------------------
+# Принудительно применяем handler сразу,
+# чтобы ниже уже проверять работающий Docker.
+# ------------------------------------------------------------
+- name: Flush handlers to restart Docker immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - docker
+    - service
+
+# ------------------------------------------------------------
+# Убеждаемся, что группа docker существует.
+# Обычно она создается пакетами Docker, но мы явно это фиксируем.
+# ------------------------------------------------------------
+- name: Ensure Docker group exists
+  ansible.builtin.group:
+    name: "{{ docker_engine_group_name }}"
+    state: present
+  tags:
+    - docker
+    - users
+
+# ------------------------------------------------------------
+# Включаем и запускаем сервис Docker.
+# systemd-модуль позволяет управлять сервисами через systemd.
+# ------------------------------------------------------------
+- name: Ensure Docker service is enabled and started
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  tags:
+    - docker
+    - service
+
+# ------------------------------------------------------------
+# Собираем список пользователей, которые реально существуют на хосте.
+# Это нужно, чтобы не падать с ошибкой, если часть пользователей
+# будет создана только в более поздней роли.
+# ------------------------------------------------------------
+- name: Gather passwd database entries
+  ansible.builtin.getent:
+    database: passwd
+  tags:
+    - docker
+    - users
+
+# ------------------------------------------------------------
+# Фильтруем только тех пользователей, которые уже существуют.
+# Благодаря этому роль docker_engine можно выполнять раньше,
+# чем роль создания пользователей.
+# ------------------------------------------------------------
+- name: Build list of existing users to be added into docker group
+  ansible.builtin.set_fact:
+    docker_engine_existing_group_members: >-
+      {{
+        docker_engine_group_members
+        | select('in', ansible_facts.getent_passwd.keys() | list)
+        | list
+      }}
+  tags:
+    - docker
+    - users
+
+# ------------------------------------------------------------
+# Добавляем существующих пользователей в группу docker.
+# append: true очень важен, чтобы не затереть остальные группы пользователя.
+# ------------------------------------------------------------
+- name: Add existing users to Docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: "{{ docker_engine_group_name }}"
+    append: true
+  loop: "{{ docker_engine_existing_group_members }}"
+  tags:
+    - docker
+    - users
+
+# ------------------------------------------------------------
+# Выводим отладочное сообщение, если какие-то пользователи из списка
+# пока не существуют. Это не ошибка, а просто подсказка.
+# ------------------------------------------------------------
+- name: Show users that were not added because they do not exist yet
+  ansible.builtin.debug:
+    msg: >-
+      The following users are not present on the host yet and were skipped
+      during Docker group assignment:
+      {{
+        docker_engine_group_members
+        | difference(docker_engine_existing_group_members)
+      }}
+  when:
+    - (docker_engine_group_members | difference(docker_engine_existing_group_members) | length) > 0
+  tags:
+    - docker
+    - users
+
+# ------------------------------------------------------------
+# Проверяем, что команда docker version отрабатывает.
+# На этом этапе мы выполняем команду от root через become,
+# потому что это самый надежный smoke test для роли.
+# ------------------------------------------------------------
+- name: Validate Docker CLI with docker version
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: docker_engine_version_check
+  changed_when: false
+  tags:
+    - docker
+    - validation
+
+# ------------------------------------------------------------
+# Дополнительная проверка docker info.
+# Она полезна, чтобы убедиться, что daemon реально отвечает.
+# ------------------------------------------------------------
+- name: Validate Docker daemon with docker info
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  register: docker_engine_info_check
+  changed_when: false
+  tags:
+    - docker
+    - validation
+
+# ------------------------------------------------------------
+# Опциональный smoke test с hello-world.
+# Он проверяет, что:
+# - daemon отвечает,
+# - pull image работает,
+# - контейнеры реально стартуют.
+#
+# Если образ уже был скачан раньше, задача все равно останется
+# хорошей базовой проверкой.
+# ------------------------------------------------------------
+- name: Run Docker hello-world smoke test
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - hello-world
+  register: docker_engine_hello_world
+  changed_when: false
+  when: docker_engine_run_hello_world_test | bool
+  tags:
+    - docker
+    - validation
+    - smoke_test
+
+# ------------------------------------------------------------
+# Финальный человекочитаемый вывод.
+# ------------------------------------------------------------
+- name: Show final Docker validation output
+  ansible.builtin.debug:
+    msg:
+      - "Docker Engine installation completed successfully."
+      - "Docker CLI is available."
+      - "Docker daemon is running."
+      - "Host is ready for the next role: NVIDIA Container Toolkit."
+      - "Users added to docker group (existing only): {{ docker_engine_existing_group_members }}"
+  tags:
+    - docker
+    - validation

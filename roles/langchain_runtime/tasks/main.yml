@@ -1,0 +1,137 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: langchain_runtime
+#
+# Что делает роль:
+# 1. Проверяет, что нужный Python уже установлен.
+# 2. Создает отдельный venv для LangChain.
+# 3. Обновляет pip stack внутри venv.
+# 4. Ставит LangChain-стек в отдельный venv.
+#
+# ВАЖНО:
+# Эта роль предполагает, что Python 3.11 уже установлен
+# отдельной ролью python_runtime или другим безопасным способом.
+# ============================================================
+
+# ------------------------------------------------------------
+# Проверяем, что нужный Python уже существует.
+# ------------------------------------------------------------
+- name: Validate required Python runtime exists before LangChain setup
+  ansible.builtin.command:
+    argv:
+      - "{{ langchain_runtime_python_binary }}"
+      - --version
+  register: langchain_runtime_python_check
+  changed_when: false
+  tags:
+    - langchain_runtime
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Создаем родительский каталог под venv.
+# ------------------------------------------------------------
+- name: Ensure parent directory for LangChain venv exists
+  ansible.builtin.file:
+    path: "{{ langchain_runtime_venv_path | dirname }}"
+    state: directory
+    owner: "{{ langchain_runtime_venv_owner }}"
+    group: "{{ langchain_runtime_venv_group }}"
+    mode: "0755"
+  tags:
+    - langchain_runtime
+    - venv
+
+# ------------------------------------------------------------
+# Создаем отдельный venv для LangChain.
+# ------------------------------------------------------------
+- name: Create LangChain virtual environment
+  ansible.builtin.command:
+    argv:
+      - "{{ langchain_runtime_python_binary }}"
+      - -m
+      - venv
+      - "{{ langchain_runtime_venv_path }}"
+  args:
+    creates: "{{ langchain_runtime_venv_path }}/bin/activate"
+  tags:
+    - langchain_runtime
+    - venv
+
+# ------------------------------------------------------------
+# Приводим владельца venv в нужное состояние.
+# ------------------------------------------------------------
+- name: Ensure ownership of LangChain virtual environment
+  ansible.builtin.file:
+    path: "{{ langchain_runtime_venv_path }}"
+    state: directory
+    owner: "{{ langchain_runtime_venv_owner }}"
+    group: "{{ langchain_runtime_venv_group }}"
+    recurse: true
+  tags:
+    - langchain_runtime
+    - venv
+
+# ------------------------------------------------------------
+# Обновляем pip stack внутри venv.
+# ------------------------------------------------------------
+- name: Upgrade pip, setuptools and wheel in LangChain venv
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest
+    virtualenv: "{{ langchain_runtime_venv_path }}"
+    virtualenv_command: "{{ langchain_runtime_python_binary }} -m venv"
+  when: langchain_runtime_upgrade_pip_stack | bool
+  tags:
+    - langchain_runtime
+    - pip
+    - venv
+
+# ------------------------------------------------------------
+# Устанавливаем основной стек LangChain.
+# ------------------------------------------------------------
+- name: Install LangChain runtime packages in venv
+  ansible.builtin.pip:
+    name: "{{ langchain_runtime_packages + langchain_runtime_extra_packages }}"
+    state: present
+    virtualenv: "{{ langchain_runtime_venv_path }}"
+    virtualenv_command: "{{ langchain_runtime_python_binary }} -m venv"
+  when: langchain_runtime_install_packages | bool
+  tags:
+    - langchain_runtime
+    - pip
+    - packages
+
+# ------------------------------------------------------------
+# Проверяем импорт установленных пакетов.
+# ------------------------------------------------------------
+- name: Validate LangChain imports inside venv
+  ansible.builtin.command:
+    argv:
+      - "{{ langchain_runtime_venv_path }}/bin/python"
+      - -c
+      - "import langchain; import langchain_community; import langgraph; print('langchain stack import ok')"
+  register: langchain_runtime_import_check
+  changed_when: false
+  tags:
+    - langchain_runtime
+    - validation
+
+# ------------------------------------------------------------
+# Финальный вывод.
+# ------------------------------------------------------------
+- name: Show final LangChain runtime installation output
+  ansible.builtin.debug:
+    msg:
+      - "LangChain runtime installation completed successfully."
+      - "Python version check: {{ langchain_runtime_python_check.stdout }}"
+      - "Virtual environment path: {{ langchain_runtime_venv_path }}"
+      - "Installed packages: {{ langchain_runtime_packages + langchain_runtime_extra_packages }}"
+      - "Import validation output: {{ langchain_runtime_import_check.stdout }}"
+  tags:
+    - langchain_runtime
+    - validation

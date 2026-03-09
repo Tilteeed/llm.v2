@@ -1,0 +1,17 @@
+---
+llm_enable_gpu_stack: true
+llm_manage_docker: true
+llm_manage_nvidia_driver: false
+llm_manage_nvidia_container_toolkit: true
+
+ubuntu_nvidia_manage_host_driver: false
+ubuntu_nvidia_smi_command: /usr/lib/wsl/lib/nvidia-smi
+
+nvidia_container_toolkit_test_image: nvidia/cuda:12.4.1-base-ubuntu22.04
+
+ollama_container_use_gpu: true
+
+monitoring_stack_enable_cadvisor: false
+monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro"
+monitoring_stack_grafana_default_dashboards:
+  - node-exporter-full.json

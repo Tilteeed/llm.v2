@@ -1,0 +1,70 @@
+---
+# ============================================================
+# defaults/main.yml
+# Роль: python_runtime
+#
+# Установка отдельного Python runtime из исходников
+# в отдельный prefix без изменения системного python3.
+# ============================================================
+
+# Целевая версия Python.
+python_runtime_version: "3.11.9"
+
+# Короткая версия Python.
+python_runtime_short_version: "3.11"
+
+# Каталог установки отдельного Python.
+python_runtime_install_prefix: "/opt/python{{ python_runtime_short_version | replace('.', '') }}"
+
+# Каталог для временной сборки исходников.
+python_runtime_build_dir: "/usr/local/src"
+
+# URL архива Python source code.
+python_runtime_source_url: "https://www.python.org/ftp/python/{{ python_runtime_version }}/Python-{{ python_runtime_version }}.tgz"
+
+# Локальный путь к архиву исходников.
+python_runtime_source_archive: "{{ python_runtime_build_dir }}/Python-{{ python_runtime_version }}.tgz"
+
+# Каталог распаковки исходников.
+python_runtime_source_dir: "{{ python_runtime_build_dir }}/Python-{{ python_runtime_version }}"
+
+# Пакеты, необходимые для сборки Python из исходников.
+python_runtime_build_packages:
+  - build-essential
+  - wget
+  - curl
+  - ca-certificates
+  - libssl-dev
+  - zlib1g-dev
+  - libbz2-dev
+  - libreadline-dev
+  - libsqlite3-dev
+  - libncursesw5-dev
+  - xz-utils
+  - tk-dev
+  - libxml2-dev
+  - libxmlsec1-dev
+  - libffi-dev
+  - liblzma-dev
+  - uuid-dev
+
+# Нужно ли выполнять make altinstall.
+# altinstall безопаснее, потому что не заменяет системный python3.
+python_runtime_use_altinstall: true
+
+# Путь к финальному python binary после установки.
+python_runtime_python_binary: "{{ python_runtime_install_prefix }}/bin/python{{ python_runtime_short_version }}"
+
+# Нужно ли создавать symlink в /usr/local/bin.
+# Это не обязательно, но иногда удобно.
+python_runtime_create_symlink: true
+python_runtime_symlink_path: "/usr/local/bin/python{{ python_runtime_short_version }}"
+
+# Нужно ли создавать базовый venv этой ролью.
+python_runtime_create_venv: false
+python_runtime_venv_path: "/opt/venvs/python{{ python_runtime_short_version | replace('.', '') }}"
+python_runtime_venv_owner: root
+python_runtime_venv_group: root
+
+# Обновлять ли pip/setuptools/wheel внутри venv.
+python_runtime_upgrade_pip_stack: true

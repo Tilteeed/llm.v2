@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================
+# Helper script for running Garak against Ollama.
+#
+# Usage examples:
+#   ./run_garak_ollama.sh
+#   ./run_garak_ollama.sh qwen2.5:7b
+#   ./run_garak_ollama.sh llama3.1:8b
+#
+# Results will be stored in:
+#   {{ garak_runner_reports_dir }}
+# ============================================================
+
+MODEL="${1:-{{ garak_runner_default_model }}}"
+
+source "{{ garak_runner_venv_dir }}/bin/activate"
+
+mkdir -p "{{ garak_runner_reports_dir }}"
+
+echo "[INFO] Running Garak against model: ${MODEL}"
+echo "[INFO] Ollama base URL: {{ garak_runner_ollama_base_url }}"
+echo "[INFO] Reports directory: {{ garak_runner_reports_dir }}"
+
+# Важно:
+# Конкретные флаги Garak и названия генераторов могут меняться
+# между версиями, поэтому этот helper-скрипт стоит воспринимать
+# как стартовую точку, а не как навсегда зафиксированный интерфейс.
+#
+# Ниже оставлен базовый вариант запуска.
+garak \
+  --model_type openai \
+  --model_name "${MODEL}" \
+  --seed 42 \
+  --report_prefix "{{ garak_runner_reports_dir }}/garak-${MODEL//[:\/]/_}"
+
+echo "[INFO] Garak run completed."

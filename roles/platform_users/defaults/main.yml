@@ -1,0 +1,27 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли platform_users.
+# ============================================================
+
+platform_users_list: []
+
+platform_users_create_home: true
+platform_users_update_password: on_create
+
+platform_users_default_groups:
+  - sudo
+  - docker
+
+platform_users_create_shared_group: true
+platform_users_shared_group_name: llm-admins
+
+platform_users_add_shared_group: true
+
+platform_users_create_shared_directory: true
+platform_users_shared_directory_path: /opt/llm/shared
+platform_users_shared_directory_owner: root
+platform_users_shared_directory_group: "{{ platform_users_shared_group_name }}"
+platform_users_shared_directory_mode: "2775"
+
+platform_users_manage_sudo_group: true

@@ -1,0 +1,325 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: ollama_container
+#
+# Что делает роль:
+# 1. Проверяет, что Docker уже установлен.
+# 2. Проверяет, что Docker daemon отвечает.
+# 3. Проверяет, что NVIDIA Container Toolkit уже настроен.
+# 4. Создает каталоги под Ollama.
+# 5. Создает Docker network для LLM-сервисов.
+# 6. Шаблонит docker compose файл.
+# 7. Запускает контейнер Ollama через docker compose.
+# 8. Проверяет, что контейнер действительно запущен.
+# 9. Проверяет доступность API Ollama.
+# ============================================================
+
+# ------------------------------------------------------------
+# Safety check: роль написана под Ubuntu.
+# ------------------------------------------------------------
+- name: Fail if target host is not Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+    fail_msg: >-
+      This role supports Ubuntu only.
+      Current distribution: {{ ansible_distribution }}
+    success_msg: >-
+      Ubuntu detected. Continuing with Ollama container deployment.
+  tags:
+    - ollama
+    - validation
+    #- always
+
+
+# ------------------------------------------------------------
+# Проверяем, что Docker CLI уже установлен.
+# Эта роль должна выполняться только после docker_engine.
+# ------------------------------------------------------------
+- name: Validate Docker CLI before Ollama deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: ollama_container_docker_version_check
+  changed_when: false
+  tags:
+    - ollama
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверяем, что Docker daemon отвечает.
+# Это дополнительная страховка перед запуском compose stack.
+# ------------------------------------------------------------
+- name: Validate Docker daemon before Ollama deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  register: ollama_container_docker_info_check
+  changed_when: false
+  tags:
+    - ollama
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверяем наличие nvidia-ctk.
+# Это не 100% гарантия GPU внутри контейнера, но хороший
+# индикатор того, что предыдущая роль уже была выполнена.
+# ------------------------------------------------------------
+- name: Check that NVIDIA Container Toolkit is installed
+  ansible.builtin.command:
+    argv:
+      - nvidia-ctk
+      - --version
+  register: ollama_container_nvidia_ctk_check
+  changed_when: false
+  when: ollama_container_use_gpu | bool
+  tags:
+    - ollama
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Создаем базовый каталог под инфраструктуру Ollama.
+# ------------------------------------------------------------
+- name: Ensure Ollama base directory exists
+  ansible.builtin.file:
+    path: "{{ ollama_container_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - ollama
+    - filesystem
+
+# ------------------------------------------------------------
+# Создаем каталог под compose-файл.
+# ------------------------------------------------------------
+- name: Ensure Ollama compose directory exists
+  ansible.builtin.file:
+    path: "{{ ollama_container_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - ollama
+    - filesystem
+
+# ------------------------------------------------------------
+# Создаем каталог с данными Ollama на хосте.
+# Здесь будут лежать модели и служебные данные.
+# ------------------------------------------------------------
+- name: Ensure Ollama data directory exists
+  ansible.builtin.file:
+    path: "{{ ollama_container_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - ollama
+    - filesystem
+    - data
+
+# ------------------------------------------------------------
+# Создаем отдельную Docker network для LLM-стека.
+# Это пригодится для подключения Open WebUI, Garak и других сервисов.
+# Используем command, потому что docker network inspect/create
+# здесь проще и прозрачнее, чем городить дополнительные зависимости.
+# ------------------------------------------------------------
+- name: Check whether Ollama Docker network already exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ ollama_container_network_name }}"
+  register: ollama_container_network_check
+  changed_when: false
+  failed_when: false
+  when: ollama_container_create_network | bool
+  tags:
+    - ollama
+    - network
+
+# ------------------------------------------------------------
+# Создаем Docker network только если ее еще нет.
+# ------------------------------------------------------------
+- name: Create Ollama Docker network
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - create
+      - "{{ ollama_container_network_name }}"
+  when:
+    - ollama_container_create_network | bool
+    - ollama_container_network_check.rc != 0
+  register: ollama_container_network_create
+  changed_when: true
+  tags:
+    - ollama
+    - network
+
+# ------------------------------------------------------------
+# Шаблоним compose-файл для контейнера Ollama.
+# Если файл изменился, дергаем handler на перезапуск стека.
+# ------------------------------------------------------------
+- name: Render Ollama docker compose file
+  ansible.builtin.template:
+    src: ollama-compose.yml.j2
+    dest: "{{ ollama_container_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: ollama_container_restart_stack
+  tags:
+    - ollama
+    - compose
+
+# ------------------------------------------------------------
+# Изменения в проекте.
+# Добавился дополнительный пунтк.
+# Специально заранее пулим ollama/ollama
+# Что это даст:
+# 3адача не будет выглядеть как “мертво висит” без движения;
+# Ansible будет опрашивать ее каждые 10 секунд;
+# Y тебя будет предел в 30 минут, а не бесконечное ожидание.
+# ------------------------------------------------------------
+
+- name: Pull Ollama image explicitly
+  ansible.builtin.command:
+    argv:
+      - docker
+      - pull
+      - "{{ ollama_container_image }}"
+  register: ollama_container_pull
+  changed_when: >
+    'Downloaded newer image' in ollama_container_pull.stdout
+    or 'Pull complete' in ollama_container_pull.stdout
+    or 'Status: Downloaded newer image' in ollama_container_pull.stdout
+    or 'Status: Image is up to date for' in ollama_container_pull.stdout
+  async: 1800
+  poll: 10
+  tags:
+    - ollama
+    - deploy
+    - image
+# ------------------------------------------------------------
+#Bывод результата pull
+# Это удобно, потому что сразу видно:
+# образ скачался,
+# образ уже был локально,
+# или pull провалился/подвис.
+# ------------------------------------------------------------
+- name: Show Ollama image pull result
+  ansible.builtin.debug:
+    var: ollama_container_pull.stdout_lines
+  tags:
+    - ollama
+    - deploy
+    - image
+# ------------------------------------------------------------
+# Поднимаем контейнер Ollama через docker compose.
+# Даже если handler не сработал, этот шаг гарантирует,
+# что контейнер будет поднят на первом запуске роли.
+# ------------------------------------------------------------
+- name: Start Ollama compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ ollama_container_compose_file }}"
+      - up
+      - -d
+  register: ollama_container_compose_up
+  changed_when: >
+    'Started' in ollama_container_compose_up.stdout
+    or 'Creating' in ollama_container_compose_up.stdout
+    or 'Recreating' in ollama_container_compose_up.stdout
+  async: 600 #Ожидание 10 минут
+  poll: 5 #Опрос каждые 5 секунд
+  tags:
+    - ollama
+    - compose
+    - deploy
+
+# ------------------------------------------------------------
+# Применяем handler сразу, если compose-файл был изменен.
+# Это полезно, чтобы проверки ниже шли уже по актуальному контейнеру.
+# ------------------------------------------------------------
+- name: Flush handlers to restart Ollama stack immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - ollama
+    - compose
+    - deploy
+
+# ------------------------------------------------------------
+# Проверяем, что контейнер Ollama реально существует и запущен.
+# docker inspect с форматом позволяет получить state running=true/false.
+# ------------------------------------------------------------
+- name: Inspect Ollama container running state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{{ '{{.State.Running}}' }}"
+      - "{{ ollama_container_name }}"
+  register: ollama_container_running_state
+  changed_when: false
+  retries: 10
+  delay: 5
+  until: ollama_container_running_state.stdout == "true"
+  tags:
+    - ollama
+    - validation
+    - deploy
+
+# ------------------------------------------------------------
+# Проверяем API Ollama.
+# Запрос к /api/tags — простой и удобный health endpoint для проверки,
+# что сервис поднялся и отвечает.
+# Используем uri для HTTP-проверки.
+# ------------------------------------------------------------
+- name: Wait until Ollama API becomes available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ollama_container_host_port }}/api/tags"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 10
+  register: ollama_container_api_check
+  retries: "{{ ollama_container_healthcheck_retries }}"
+  delay: "{{ ollama_container_healthcheck_delay }}"
+  until: ollama_container_api_check.status == 200
+  changed_when: false
+  tags:
+    - ollama
+    - validation
+    - healthcheck
+
+# ------------------------------------------------------------
+# Финальный понятный вывод.
+# ------------------------------------------------------------
+- name: Show final Ollama deployment validation output
+  ansible.builtin.debug:
+    msg:
+      - "Ollama container deployment completed successfully."
+      - "Container name: {{ ollama_container_name }}"
+      - "Image: {{ ollama_container_image }}"
+      - "Published API endpoint: http://{{ ollama_container_bind_address }}:{{ ollama_container_host_port }}"
+      - "Docker network: {{ ollama_container_network_name }}"
+      - "Data directory on host: {{ ollama_container_data_dir }}"
+      - "Host is ready for the next role: ollama_pull_models."
+  tags:
+    - ollama
+    - validation

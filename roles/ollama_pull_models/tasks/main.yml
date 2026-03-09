@@ -1,0 +1,250 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: ollama_pull_models
+#
+# Что делает роль:
+# 1. Проверяет, что контейнер Ollama существует и запущен.
+# 2. Проверяет доступность API Ollama.
+# 3. Получает текущий список моделей через ollama list.
+# 4. Формирует список моделей, которые надо подтянуть.
+# 5. Выполняет ollama pull только для недостающих моделей
+#    (или для всех, если включен force mode).
+# 6. Показывает финальный список моделей.
+# ============================================================
+
+# ------------------------------------------------------------
+# Проверяем, что контейнер Ollama вообще существует.
+# Если контейнер не найден, значит предыдущая роль либо не была
+# выполнена, либо контейнер был удален/переименован.
+# ------------------------------------------------------------
+- name: Check that Ollama container exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{{ '{{.Name}}' }}"
+      - "{{ ollama_pull_models_container_name }}"
+  register: ollama_pull_models_container_exists
+  changed_when: false
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Проверяем, что контейнер реально запущен.
+# Нас интересует именно running=true.
+# ------------------------------------------------------------
+- name: Check that Ollama container is running
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{{ '{{.State.Running}}' }}"
+      - "{{ ollama_pull_models_container_name }}"
+  register: ollama_pull_models_container_running
+  changed_when: false
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Явно подтверждаем, что контейнер находится в состоянии running.
+# Это делает ошибку более понятной, чем просто failed rc.
+# ------------------------------------------------------------
+- name: Fail if Ollama container is not running
+  ansible.builtin.assert:
+    that:
+      - ollama_pull_models_container_running.stdout == "true"
+    fail_msg: >-
+      Ollama container {{ ollama_pull_models_container_name }} is not running.
+      Run the ollama_container role first and verify container health.
+    success_msg: >-
+      Ollama container is running. Proceeding with model synchronization.
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Проверяем доступность API Ollama.
+# Это полезно, потому что контейнер может быть "running",
+# но сам сервис внутри еще не готов.
+# ------------------------------------------------------------
+- name: Wait until Ollama API is available before model pull
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ollama_container_host_port }}/api/tags"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 10
+  register: ollama_pull_models_api_check
+  retries: "{{ ollama_pull_models_api_retries }}"
+  delay: "{{ ollama_pull_models_api_delay }}"
+  until: ollama_pull_models_api_check.status == 200
+  changed_when: false
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Получаем текущий список моделей через команду ollama list
+# внутри контейнера.
+#
+# Важно:
+# Мы выполняем команду внутри контейнера, потому что Ollama
+# уже развернут именно как контейнер.
+# ------------------------------------------------------------
+- name: Get current Ollama model list from container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ollama_pull_models_container_name }}"
+      - ollama
+      - list
+  register: ollama_pull_models_current_list_raw
+  changed_when: false
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Преобразуем вывод ollama list в более удобный список имен моделей.
+#
+# Обычно первая строка — заголовок таблицы, а дальше идут строки вида:
+# model_name  model_id  size  modified
+#
+# Здесь мы берем первую колонку каждой строки, пропуская заголовок
+# и пустые строки.
+# ------------------------------------------------------------
+- name: Build parsed list of already available Ollama models
+  ansible.builtin.set_fact:
+    ollama_pull_models_existing_list: >-
+      {{
+        ollama_pull_models_current_list_raw.stdout_lines[1:]
+        | reject('equalto', '')
+        | map('split')
+        | map('first')
+        | list
+      }}
+  tags:
+    - ollama
+    - models
+
+# ------------------------------------------------------------
+# Формируем итоговый список моделей, которые надо подтянуть.
+#
+# Если force=false:
+#   подтягиваем только отсутствующие модели.
+#
+# Если force=true:
+#   подтягиваем весь список из переменной.
+# ------------------------------------------------------------
+- name: Build final list of models to pull
+  ansible.builtin.set_fact:
+    ollama_pull_models_to_pull: >-
+      {{
+        ollama_pull_models_list
+        if (ollama_pull_models_force | bool)
+        else
+        (ollama_pull_models_list | difference(ollama_pull_models_existing_list))
+      }}
+  tags:
+    - ollama
+    - models
+
+# ------------------------------------------------------------
+# Показываем, какие модели уже есть, а какие будут тянуться.
+# Это очень полезный отладочный и документирующий вывод.
+# ------------------------------------------------------------
+- name: Show Ollama model synchronization plan
+  ansible.builtin.debug:
+    msg:
+      - "Requested models: {{ ollama_pull_models_list }}"
+      - "Already available models: {{ ollama_pull_models_existing_list }}"
+      - "Force repull mode: {{ ollama_pull_models_force }}"
+      - "Models to pull now: {{ ollama_pull_models_to_pull }}"
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Подтягиваем модели по одной через docker exec.
+#
+# Почему по одной:
+# - проще видеть, какая конкретно модель упала;
+# - удобнее дебажить;
+# - понятнее читать вывод playbook.
+# ------------------------------------------------------------
+- name: Pull required Ollama models inside container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ollama_pull_models_container_name }}"
+      - ollama
+      - pull
+      - "{{ item }}"
+  loop: "{{ ollama_pull_models_to_pull }}"
+  register: ollama_pull_models_pull_results
+  changed_when: true
+  when: ollama_pull_models_to_pull | length > 0
+  tags:
+    - ollama
+    - models
+    - pull
+
+# ------------------------------------------------------------
+# Если все модели уже были на месте, выводим понятное сообщение.
+# Это не ошибка, а корректный "idempotent" результат.
+# ------------------------------------------------------------
+- name: Show message when no models need to be pulled
+  ansible.builtin.debug:
+    msg: >-
+      All requested Ollama models are already present.
+      Nothing needs to be pulled.
+  when: ollama_pull_models_to_pull | length == 0
+  tags:
+    - ollama
+    - models
+    - pull
+
+# ------------------------------------------------------------
+# Повторно выводим список моделей после pull.
+# Это удобно как итоговая проверка.
+# ------------------------------------------------------------
+- name: Get final Ollama model list after synchronization
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ollama_pull_models_container_name }}"
+      - ollama
+      - list
+  register: ollama_pull_models_final_list_raw
+  changed_when: false
+  when: ollama_pull_models_show_final_list | bool
+  tags:
+    - ollama
+    - models
+    - validation
+
+# ------------------------------------------------------------
+# Финальный красивый вывод.
+# ------------------------------------------------------------
+- name: Show final Ollama model list
+  ansible.builtin.debug:
+    msg: "{{ ollama_pull_models_final_list_raw.stdout_lines }}"
+  when: ollama_pull_models_show_final_list | bool
+  tags:
+    - ollama
+    - models
+    - validation

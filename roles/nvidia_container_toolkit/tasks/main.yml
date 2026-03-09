@@ -1,0 +1,277 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: nvidia_container_toolkit
+#
+# Что делает роль:
+# 1. Проверяет, что ОС — Ubuntu.
+# 2. Проверяет, что host NVIDIA driver уже работает.
+# 3. Проверяет, что Docker уже установлен.
+# 4. Проверяет сетевую доступность NVIDIA repository.
+# 5. Ставит пакеты-предпосылки.
+# 6. Загружает GPG key для NVIDIA Container Toolkit.
+# 7. Формирует apt source list для NVIDIA repo.
+# 8. Обновляет apt cache.
+# 9. Устанавливает nvidia-container-toolkit.
+# 10. Настраивает Docker runtime через nvidia-ctk.
+# 11. Перезапускает Docker.
+# 12. Проверяет, что контейнер с --gpus all видит Tesla T4.
+# ============================================================
+
+# ------------------------------------------------------------
+# Safety check: роль написана под Ubuntu.
+# ------------------------------------------------------------
+- name: Fail if target host is not Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+    fail_msg: >-
+      This role supports Ubuntu only.
+      Current distribution: {{ ansible_distribution }}
+    success_msg: >-
+      Ubuntu detected. Continuing with NVIDIA Container Toolkit installation.
+  tags:
+    - nvidia
+    - validation
+    #- always
+
+
+# ------------------------------------------------------------
+# Проверяем, что host driver уже установлен и работает.
+# Если nvidia-smi не работает на хосте, то нет смысла идти дальше:
+# toolkit сам по себе GPU в контейнере не "создаст".
+# ------------------------------------------------------------
+- name: Validate host NVIDIA access with configured nvidia-smi command before toolkit installation
+  ansible.builtin.command:
+    argv:
+      - "{{ ubuntu_nvidia_smi_command }}"
+  register: nvidia_container_toolkit_host_smi_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - nvidia
+    - validation
+    - prereq
+
+# debug for verxniy task ))
+- name: Show NVIDIA toolkit mode details
+  ansible.builtin.debug:
+    msg:
+      - "Host driver management mode: {{ 'standard Linux host' if (ubuntu_nvidia_manage_host_driver | bool) else 'WSL-compatible mode' }}"
+      - "Host nvidia-smi command: {{ ubuntu_nvidia_smi_command }}"
+      - "Host nvidia-smi precheck rc: {{ nvidia_container_toolkit_host_smi_check.rc }}"
+  tags:
+    - nvidia
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверяем, что Docker уже установлен.
+# Эта роль идет после docker_engine, поэтому docker version
+# должен отрабатывать успешно.
+# ------------------------------------------------------------
+- name: Validate Docker CLI before NVIDIA toolkit installation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: nvidia_container_toolkit_docker_check
+  changed_when: false
+  tags:
+    - docker
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверка сетевой доступности NVIDIA repository endpoint.
+# Это помогает быстро отловить проблемы DNS/маршрутизации/интернета.
+# ------------------------------------------------------------
+- name: Check network access to NVIDIA libnvidia-container repository
+  ansible.builtin.uri:
+    url: https://nvidia.github.io/libnvidia-container/
+    method: GET
+    return_content: false
+    status_code: [200, 301, 302, 403]
+    timeout: 20
+  register: nvidia_container_toolkit_repo_connectivity
+  changed_when: false
+  tags:
+    - nvidia
+    - repo
+    - validation
+
+# ------------------------------------------------------------
+# Ставим пакеты-предпосылки для работы с HTTPS-репозиторием.
+# ------------------------------------------------------------
+- name: Install prerequisite packages for NVIDIA Container Toolkit repository
+  ansible.builtin.apt:
+    name: "{{ nvidia_container_toolkit_prerequisite_packages }}"
+    state: present
+    update_cache: true
+  tags:
+    - nvidia
+    - repo
+    - packages
+
+# ------------------------------------------------------------
+# Загружаем официальный GPG key для NVIDIA Container Toolkit.
+# Он будет использоваться apt для верификации пакетов из repo.
+# ------------------------------------------------------------
+- name: Download NVIDIA Container Toolkit GPG key
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+      | gpg --dearmor -o {{ nvidia_container_toolkit_keyring_path }}
+  args:
+    creates: "{{ nvidia_container_toolkit_keyring_path }}"
+    executable: /bin/bash
+  tags:
+    - nvidia
+    - repo
+
+# ------------------------------------------------------------
+# Формируем apt source list для NVIDIA Container Toolkit repo.
+# Здесь используется официальный способ: скачать repo-list и
+# подставить signed-by=... для keyring.
+#
+# shell здесь оправдан, потому что нужен pipeline с sed.
+# ------------------------------------------------------------
+- name: Configure NVIDIA Container Toolkit apt repository
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -s -L {{ nvidia_container_toolkit_repo_list_url }} \
+      | sed 's#deb https://#deb [signed-by={{ nvidia_container_toolkit_keyring_path }}] https://#g' \
+      > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  args:
+    executable: /bin/bash
+  tags:
+    - nvidia
+    - repo
+
+# ------------------------------------------------------------
+# Обновляем apt cache после добавления репозитория,
+# чтобы пакеты toolkit стали доступны для установки.
+# ------------------------------------------------------------
+- name: Update apt cache after adding NVIDIA Container Toolkit repository
+  ansible.builtin.apt:
+    update_cache: true
+  tags:
+    - nvidia
+    - repo
+    - packages
+
+# ------------------------------------------------------------
+# Устанавливаем основной пакет NVIDIA Container Toolkit.
+# ------------------------------------------------------------
+- name: Install NVIDIA Container Toolkit packages
+  ansible.builtin.apt:
+    name: "{{ nvidia_container_toolkit_packages }}"
+    state: present
+  tags:
+    - nvidia
+    - packages
+
+# ------------------------------------------------------------
+# Настраиваем Docker runtime для поддержки GPU.
+# Это официальный рекомендуемый шаг:
+# nvidia-ctk runtime configure --runtime=docker
+#
+# После этого Docker получает нужную конфигурацию, чтобы
+# контейнеры с --gpus all могли видеть GPU.
+# ------------------------------------------------------------
+- name: Configure Docker runtime for NVIDIA Container Toolkit
+  ansible.builtin.command:
+    argv:
+      - nvidia-ctk
+      - runtime
+      - configure
+      - --runtime=docker
+  register: nvidia_container_toolkit_runtime_config
+  changed_when: "'wrote updated config' in (nvidia_container_toolkit_runtime_config.stdout | lower) or 'wrote updated config' in (nvidia_container_toolkit_runtime_config.stderr | lower)"
+  notify: nvidia_container_toolkit_restart_docker
+  tags:
+    - nvidia
+    - runtime
+    - docker
+
+# ------------------------------------------------------------
+# Применяем handler сразу, чтобы ниже тестировать уже
+# перезапущенный Docker.
+# ------------------------------------------------------------
+- name: Flush handlers to restart Docker immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - nvidia
+    - docker
+    - runtime
+
+# ------------------------------------------------------------
+# Дополнительная проверка содержимого /etc/docker/daemon.json.
+# Мы не валидируем каждую строчку, но убеждаемся, что файл есть.
+# ------------------------------------------------------------
+- name: Check Docker daemon configuration file
+  ansible.builtin.stat:
+    path: /etc/docker/daemon.json
+  register: nvidia_container_toolkit_daemon_json
+  tags:
+    - nvidia
+    - docker
+    - validation
+
+# ------------------------------------------------------------
+# Подтверждаем, что конфиг Docker daemon существует после
+# настройки runtime.
+# ------------------------------------------------------------
+- name: Assert Docker daemon configuration file exists
+  ansible.builtin.assert:
+    that:
+      - nvidia_container_toolkit_daemon_json.stat.exists
+    fail_msg: >-
+      /etc/docker/daemon.json was not found after nvidia-ctk runtime configuration.
+      Check Docker and NVIDIA Container Toolkit setup.
+    success_msg: >-
+      Docker daemon configuration file exists.
+  tags:
+    - nvidia
+    - docker
+    - validation
+
+# ------------------------------------------------------------
+# Проверяем доступность GPU внутри контейнера.
+# Это ключевой smoke test роли:
+# если команда внутри контейнера показывает nvidia-smi,
+# значит стек host driver + docker + toolkit работает.
+# ------------------------------------------------------------
+- name: Validate GPU access inside container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --gpus
+      - all
+      - "{{ nvidia_container_toolkit_test_image }}"
+      - nvidia-smi
+  register: nvidia_container_toolkit_gpu_test
+  changed_when: false
+  when: nvidia_container_toolkit_run_gpu_test | bool
+  tags:
+    - nvidia
+    - docker
+    - validation
+    - smoke_test
+
+# ------------------------------------------------------------
+# Финальный вывод для удобства.
+# ------------------------------------------------------------
+- name: Show final NVIDIA Container Toolkit validation output
+  ansible.builtin.debug:
+    msg:
+      - "NVIDIA Container Toolkit installation completed successfully."
+      - "Docker runtime has been configured for GPU workloads."
+      - "GPU container test status: {{ 'enabled and passed' if nvidia_container_toolkit_run_gpu_test else 'skipped by variable' }}"
+      - "Host is ready for the next role: Ollama container deployment."
+  tags:
+    - nvidia
+    - docker
+    - validation

@@ -1,0 +1,175 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: platform_users
+#
+# Что делает роль:
+# 1. Проверяет, что список пользователей задан.
+# 2. Проверяет наличие системных групп sudo/docker.
+# 3. При необходимости создает общий group для команды.
+# 4. Создает пользователей с домашними каталогами.
+# 5. Назначает им password_hash.
+# 6. Добавляет их в sudo/docker и общий group.
+# 7. При необходимости создает общий каталог команды.
+# 8. Делает финальный понятный вывод.
+# ============================================================
+
+# ------------------------------------------------------------
+# Проверяем, что список пользователей вообще задан.
+# Если список пустой, роль не должна молча "успешно" ничего не делать.
+# ------------------------------------------------------------
+- name: Assert platform users list is defined and not empty
+  ansible.builtin.assert:
+    that:
+      - platform_users_list is defined
+      - platform_users_list | length > 0
+    fail_msg: >-
+      platform_users_list is empty or undefined.
+      Define users in group_vars/llm_nodes.yml before running this role.
+    success_msg: >-
+      platform_users_list is defined. Proceeding with user creation.
+  tags:
+    - users
+    - validation
+
+# ------------------------------------------------------------
+# Проверяем, существует ли системная группа docker.
+# Эта роль обычно идет после docker_engine, но мы явно это проверяем.
+# ------------------------------------------------------------
+- name: Gather system groups from getent
+  ansible.builtin.getent:
+    database: group
+  tags:
+    - users
+    - validation
+    - groups
+
+# ------------------------------------------------------------
+# Подтверждаем наличие группы docker.
+# Если Docker еще не установлен, лучше честно остановиться.
+# ------------------------------------------------------------
+- name: Assert docker group exists
+  ansible.builtin.assert:
+    that:
+      - "'docker' in ansible_facts.getent_group"
+    fail_msg: >-
+      Docker group was not found on the target host.
+      Run docker_engine role before platform_users.
+    success_msg: >-
+      Docker group exists on the target host.
+  tags:
+    - users
+    - validation
+    - groups
+
+# ------------------------------------------------------------
+# Подтверждаем наличие группы sudo.
+# На Ubuntu это стандартная группа для административных прав.
+# ------------------------------------------------------------
+- name: Assert sudo group exists
+  ansible.builtin.assert:
+    that:
+      - "'sudo' in ansible_facts.getent_group"
+    fail_msg: >-
+      Sudo group was not found on the target host.
+      Check the base OS configuration.
+    success_msg: >-
+      Sudo group exists on the target host.
+  tags:
+    - users
+    - validation
+    - groups
+
+# ------------------------------------------------------------
+# Создаем общий group для команды, если он включен переменной.
+# Это полезно для общего доступа к каталогам и артефактам.
+# ------------------------------------------------------------
+- name: Ensure shared LLM admin group exists
+  ansible.builtin.group:
+    name: "{{ platform_users_shared_group_name }}"
+    state: present
+  when: platform_users_create_shared_group | bool
+  tags:
+    - users
+    - groups
+
+# ------------------------------------------------------------
+# Формируем итоговый список групп для пользователей.
+# Если включен общий group, добавляем его к sudo и docker.
+# ------------------------------------------------------------
+- name: Build final supplemental groups for platform users
+  ansible.builtin.set_fact:
+    platform_users_final_groups: >-
+      {{
+        platform_users_default_groups
+        + ([platform_users_shared_group_name] if (platform_users_add_shared_group | bool) else [])
+      }}
+  tags:
+    - users
+    - groups
+
+# ------------------------------------------------------------
+# Создаем пользователей.
+#
+# password:
+# ожидает именно hash, а не открытый пароль.
+#
+# groups:
+# перечисляем все дополнительные группы через запятую.
+#
+# append=true:
+# важно, чтобы не перезаписать другие группы пользователя,
+# если они уже есть.
+#
+# update_password:
+# on_create -> пароль задается только при создании
+# always    -> обновляется на каждом прогоне
+# ------------------------------------------------------------
+- name: Create or manage platform users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    comment: "{{ item.comment | default(item.name) }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    create_home: "{{ platform_users_create_home }}"
+    password: "{{ item.password_hash }}"
+    update_password: "{{ platform_users_update_password }}"
+    groups: "{{ platform_users_final_groups | join(',') }}"
+    append: true
+    state: present
+  loop: "{{ platform_users_list }}"
+  tags:
+    - users
+    - accounts
+
+# ------------------------------------------------------------
+# Создаем общий каталог для командной работы.
+# setgid bit в режиме 2775 нужен для того, чтобы новые файлы
+# наследовали group каталога.
+# ------------------------------------------------------------
+- name: Ensure shared platform directory exists
+  ansible.builtin.file:
+    path: "{{ platform_users_shared_directory_path }}"
+    state: directory
+    owner: "{{ platform_users_shared_directory_owner }}"
+    group: "{{ platform_users_shared_directory_group }}"
+    mode: "{{ platform_users_shared_directory_mode }}"
+  when: platform_users_create_shared_directory | bool
+  tags:
+    - users
+    - filesystem
+    - shared
+
+# ------------------------------------------------------------
+# Дополнительный человекочитаемый вывод по созданным пользователям.
+# ------------------------------------------------------------
+- name: Show final platform user management summary
+  ansible.builtin.debug:
+    msg:
+      - "Platform users role completed successfully."
+      - "Managed users: {{ platform_users_list | map(attribute='name') | list }}"
+      - "Supplemental groups assigned: {{ platform_users_final_groups }}"
+      - "Shared directory: {{ platform_users_shared_directory_path if platform_users_create_shared_directory else 'disabled' }}"
+      - "Password mode: hashes only, update_password={{ platform_users_update_password }}"
+  tags:
+    - users
+    - validation

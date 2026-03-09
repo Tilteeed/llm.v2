@@ -1,0 +1,28 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли garak_runner.
+# ============================================================
+
+garak_runner_base_dir: /opt/llm/garak
+garak_runner_venv_dir: "{{ garak_runner_base_dir }}/venv"
+garak_runner_reports_dir: "{{ garak_runner_base_dir }}/reports"
+garak_runner_bin_dir: "{{ garak_runner_base_dir }}/bin"
+
+garak_runner_owner: root
+garak_runner_group: root
+
+garak_runner_use_custom_python: true
+garak_runner_custom_python_binary: /opt/python311/bin/python3.11 # для Ubuntu 20.04 и старых хостов
+garak_runner_system_python_binary: /usr/bin/python3 
+
+garak_runner_pip_package: garak
+garak_runner_package_spec: "garak==0.14.0"
+garak_runner_pip_cache_dir: /opt/llm/pip-cache
+garak_runner_upgrade_pip_stack: true
+
+garak_runner_ollama_base_url: "http://127.0.0.1:11434"
+garak_runner_default_model: "qwen2.5:7b"
+
+garak_runner_create_helper_script: true
+garak_runner_helper_script_path: "{{ garak_runner_bin_dir }}/run_garak_ollama.sh"

@@ -1,0 +1,306 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: ubuntu_base_nvidia_host
+#
+# Что делает роль:
+# 1. Проверяет, что хост действительно Ubuntu.
+# 2. Обновляет apt cache.
+# 3. По желанию делает dist-upgrade (по умолчанию выключено).
+# 4. Ставит базовые пакеты и Python-инструменты.
+# 5. Проверяет доступность GPU:
+#    - для обычной Ubuntu VM через lspci и nvidia-smi
+#    - для WSL2 через nvidia-smi по специальному пути
+# 6. Если это обычная VM и драйвер не работает, ставит его через
+#    ubuntu-drivers autoinstall.
+# 7. При необходимости инициирует reboot.
+# 8. После reboot проверяет:
+#    - nvidia-smi
+#    - наличие информации о GPU в /proc/driver/nvidia/gpus
+#      (только для обычной Ubuntu VM, не для WSL2)
+# ============================================================
+
+# ------------------------------------------------------------
+# Safety check: роль написана именно под Ubuntu.
+# Если запустить ее на другом дистрибутиве, мы специально
+# завершаем выполнение с понятной ошибкой.
+# ------------------------------------------------------------
+- name: Fail if target host is not Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+    fail_msg: >-
+      This role supports Ubuntu only.
+      Current distribution: {{ ansible_distribution }}
+    success_msg: >-
+      Ubuntu detected. Continuing with base preparation and NVIDIA host driver installation.
+  tags:
+    - always
+
+# ------------------------------------------------------------
+# Обновляем apt cache.
+# Это безопасный шаг и нужен почти всегда перед установкой пакетов.
+# ------------------------------------------------------------
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  tags:
+    - apt
+    - packages
+
+# ------------------------------------------------------------
+# Опциональный dist-upgrade.
+# По умолчанию выключен, потому что может потянуть ядро,
+# системные библиотеки и вызвать нежелательные побочные эффекты.
+# Включать только осознанно через переменную:
+# ubuntu_base_do_dist_upgrade: true
+# ------------------------------------------------------------
+- name: Perform distribution upgrade only if explicitly enabled
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+  when: ubuntu_base_do_dist_upgrade | bool
+  tags:
+    - apt
+    - packages
+    - upgrade
+
+# ------------------------------------------------------------
+# Ставим базовые утилиты, python3, pip, venv и инструменты,
+# нужные для установки и диагностики драйверов.
+# ------------------------------------------------------------
+- name: Install base packages and Python tooling
+  ansible.builtin.apt:
+    name: "{{ ubuntu_base_packages }}"
+    state: present
+  tags:
+    - apt
+    - packages
+    - python
+
+# ------------------------------------------------------------
+# Дополнительная проверка PCI-устройств.
+# Для обычной Ubuntu VM это полезная проверка наличия NVIDIA GPU.
+# Для WSL2 она не является надежным критерием, поэтому там мы
+# не будем использовать ее как обязательную.
+# ------------------------------------------------------------
+- name: Collect PCI devices list
+  ansible.builtin.command:
+    argv:
+      - lspci
+      - -nn
+  register: ubuntu_nvidia_lspci
+  changed_when: false
+  failed_when: false
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Для стандартной Ubuntu VM проверяем, что в PCI-списке есть NVIDIA.
+# Для WSL2 этот assert пропускается.
+# ------------------------------------------------------------
+- name: Validate NVIDIA presence for standard Linux host mode
+  ansible.builtin.assert:
+    that:
+      - "'NVIDIA' in ubuntu_nvidia_lspci.stdout"
+    fail_msg: >-
+      No NVIDIA device detected in PCI list.
+      Check that the VM was created with an attached NVIDIA GPU.
+    success_msg: >-
+      NVIDIA PCI device detected. Proceeding with driver checks.
+  when: ubuntu_nvidia_manage_host_driver | bool
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Для WSL2 выводим понятное сообщение, что PCI-проверка
+# не используется как обязательная.
+# ------------------------------------------------------------
+- name: Skip strict PCI GPU detection in WSL mode
+  ansible.builtin.debug:
+    msg: >-
+      Strict NVIDIA PCI detection is skipped because
+      ubuntu_nvidia_manage_host_driver=false.
+      This is expected in WSL2, where GPU is not exposed like a standard PCI device.
+  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Проверяем, работает ли nvidia-smi уже сейчас.
+# Для обычной VM это помогает понять, нужен ли install driver.
+# Для WSL2 это основной способ проверки доступности GPU.
+# ------------------------------------------------------------
+- name: Check whether nvidia-smi is already working
+  ansible.builtin.command:
+    argv:
+      - "{{ ubuntu_nvidia_smi_command }}"
+  register: ubuntu_nvidia_smi_precheck
+  changed_when: false
+  failed_when: false
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Полезный флаг:
+# - true  -> для обычной Ubuntu VM драйвер не работает, нужно ставить
+# - false -> драйвер уже работает или мы в WSL2, где host driver не ставим
+# ------------------------------------------------------------
+- name: Define whether NVIDIA driver installation is required
+  ansible.builtin.set_fact:
+    ubuntu_nvidia_install_required: >-
+      {{
+        (ubuntu_nvidia_manage_host_driver | bool)
+        and (
+          (ubuntu_nvidia_smi_precheck.rc != 0)
+          or (ubuntu_nvidia_force_reinstall | bool)
+        )
+      }}
+  tags:
+    - nvidia
+
+# ------------------------------------------------------------
+# Сообщение для WSL2-режима.
+# В WSL2 мы не ставим Linux NVIDIA host driver внутри Ubuntu.
+# ------------------------------------------------------------
+- name: Show message when host NVIDIA driver management is disabled
+  ansible.builtin.debug:
+    msg: >-
+      Host NVIDIA driver installation is disabled by variable
+      ubuntu_nvidia_manage_host_driver=false.
+      This is expected for WSL2, where GPU support is provided
+      by Windows/WSL instead of installing Linux host drivers inside Ubuntu.
+  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Пока поддерживаем только способ установки "auto".
+# Это самый понятный старт для Ubuntu + T4:
+# ubuntu-drivers autoinstall
+#
+# Если драйвер уже работает, задача пропускается.
+# Если установка была выполнена, уведомляем handler о reboot.
+# ------------------------------------------------------------
+- name: Install NVIDIA driver automatically with ubuntu-drivers autoinstall
+  ansible.builtin.command:
+    argv:
+      - ubuntu-drivers
+      - autoinstall
+  register: ubuntu_nvidia_driver_install
+  when:
+    - ubuntu_nvidia_driver_install_method == "auto"
+    - ubuntu_nvidia_install_required | bool
+  changed_when: ubuntu_nvidia_install_required | bool
+  notify: nvidia_driver_reboot_required
+  tags:
+    - nvidia
+    - driver_install
+
+# ------------------------------------------------------------
+# Если позже ты захочешь ставить конкретный пакет драйвера,
+# можно расширить роль отдельной веткой when.
+# Пока здесь оставляем явную ошибку на случай, если в переменной
+# кто-то укажет неподдерживаемый режим.
+# ------------------------------------------------------------
+- name: Fail on unsupported NVIDIA driver installation method
+  ansible.builtin.fail:
+    msg: >-
+      Unsupported ubuntu_nvidia_driver_install_method: {{ ubuntu_nvidia_driver_install_method }}.
+      Currently supported value: auto
+  when: ubuntu_nvidia_driver_install_method not in ['auto']
+  tags:
+    - nvidia
+    - driver_install
+
+# ------------------------------------------------------------
+# Принудительно выполняем handler сейчас, а не в самом конце play.
+# Это нужно потому, что далее в этой же роли мы хотим провести
+# пост-проверки уже после перезагрузки.
+# ------------------------------------------------------------
+- name: Flush handlers to reboot immediately if driver was installed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - nvidia
+    - reboot
+
+# ------------------------------------------------------------
+# После reboot или даже если reboot не требовался, повторно
+# проверяем nvidia-smi.
+#
+# В обычном Linux host mode это проверка после установки драйвера.
+# В WSL mode она выполняется только если nvidia-smi уже доступен
+# до этого, потому что драйвер внутри Ubuntu не устанавливается.
+# ------------------------------------------------------------
+- name: Validate NVIDIA availability with nvidia-smi after installation/reboot or in WSL mode
+  ansible.builtin.command:
+    argv:
+      - "{{ ubuntu_nvidia_smi_command }}"
+  register: ubuntu_nvidia_smi_postcheck
+  changed_when: false
+  failed_when: false
+  retries: 10
+  delay: 10
+  until: ubuntu_nvidia_smi_postcheck.rc == 0
+  when: ubuntu_nvidia_manage_host_driver | bool or ubuntu_nvidia_smi_precheck.rc == 0
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Дополнительная проверка через procfs:
+# если драйвер поднялся корректно, на Linux обычно появляется
+# каталог /proc/driver/nvidia/gpus.
+#
+# Для WSL2 эта проверка не обязательна и пропускается.
+# ------------------------------------------------------------
+- name: Check NVIDIA procfs directory
+  ansible.builtin.stat:
+    path: /proc/driver/nvidia/gpus
+  register: ubuntu_nvidia_procfs
+  when: ubuntu_nvidia_manage_host_driver | bool
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Если каталог отсутствует, считаем это проблемой.
+# Эта проверка относится только к стандартному Linux host mode.
+# ------------------------------------------------------------
+- name: Fail if NVIDIA procfs directory is missing
+  ansible.builtin.assert:
+    that:
+      - ubuntu_nvidia_procfs.stat.exists
+    fail_msg: >-
+      NVIDIA procfs directory /proc/driver/nvidia/gpus was not found.
+      The driver may not be initialized correctly.
+    success_msg: >-
+      NVIDIA procfs directory is present.
+  when: ubuntu_nvidia_manage_host_driver | bool
+  tags:
+    - nvidia
+    - validation
+
+# ------------------------------------------------------------
+# Финальный человекочитаемый вывод.
+# Для WSL mode не утверждаем то, что не проверялось.
+# ------------------------------------------------------------
+- name: Show final NVIDIA validation output
+  ansible.builtin.debug:
+    msg:
+      - "Host NVIDIA driver management mode: {{ 'standard Linux host' if (ubuntu_nvidia_manage_host_driver | bool) else 'WSL-compatible mode' }}"
+      - "nvidia-smi command used: {{ ubuntu_nvidia_smi_command }}"
+      - "nvidia-smi precheck rc: {{ ubuntu_nvidia_smi_precheck.rc }}"
+      - "nvidia-smi postcheck rc: {{ ubuntu_nvidia_smi_postcheck.rc if (ubuntu_nvidia_smi_postcheck is defined and ubuntu_nvidia_smi_postcheck.rc is defined) else 'not executed' }}"
+      - "PCI validation executed: {{ 'yes' if (ubuntu_nvidia_manage_host_driver | bool) else 'no, skipped for WSL mode' }}"
+      - "Procfs validation executed: {{ 'yes' if (ubuntu_nvidia_manage_host_driver | bool) else 'no, skipped for WSL mode' }}"
+      - "Host is ready for the next role: Docker installation."
+  tags:
+    - nvidia
+    - validation

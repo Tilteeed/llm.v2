@@ -1,0 +1,231 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: python_runtime
+#
+# Что делает роль:
+# 1. Проверяет, что хост действительно Ubuntu.
+# 2. Ставит зависимости для сборки Python из исходников.
+# 3. Скачивает архив Python source code.
+# 4. Распаковывает исходники.
+# 5. Конфигурирует сборку в отдельный prefix.
+# 6. Собирает и устанавливает Python через make altinstall.
+# 7. НЕ меняет системный /usr/bin/python3.
+# 8. При необходимости создает отдельный venv.
+# ============================================================
+
+- name: Fail if target host is not Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+    fail_msg: >-
+      This role supports Ubuntu only.
+      Current distribution: {{ ansible_distribution }}
+    success_msg: >-
+      Ubuntu detected. Continuing with separate Python runtime installation.
+  tags:
+    - python_runtime
+    - validation
+
+- name: Install prerequisite packages for Python source build
+  ansible.builtin.apt:
+    name: "{{ python_runtime_build_packages }}"
+    state: present
+    update_cache: true
+  tags:
+    - python_runtime
+    - packages
+    - build
+
+- name: Ensure Python build directory exists
+  ansible.builtin.file:
+    path: "{{ python_runtime_build_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - python_runtime
+    - build
+
+- name: Download Python source archive
+  ansible.builtin.get_url:
+    url: "{{ python_runtime_source_url }}"
+    dest: "{{ python_runtime_source_archive }}"
+    mode: "0644"
+  tags:
+    - python_runtime
+    - build
+    - download
+
+- name: Extract Python source archive
+  ansible.builtin.unarchive:
+    src: "{{ python_runtime_source_archive }}"
+    dest: "{{ python_runtime_build_dir }}"
+    remote_src: true
+    creates: "{{ python_runtime_source_dir }}"
+  tags:
+    - python_runtime
+    - build
+    - extract
+
+- name: Check whether separate Python runtime is already installed
+  ansible.builtin.stat:
+    path: "{{ python_runtime_python_binary }}"
+  register: python_runtime_binary_stat
+  tags:
+    - python_runtime
+    - validation
+
+- name: Configure Python source build
+  ansible.builtin.command:
+    argv:
+      - ./configure
+      - "--prefix={{ python_runtime_install_prefix }}"
+      - --enable-optimizations
+      - --with-ensurepip=install
+  args:
+    chdir: "{{ python_runtime_source_dir }}"
+    creates: "{{ python_runtime_source_dir }}/Makefile"
+  when: not python_runtime_binary_stat.stat.exists
+  tags:
+    - python_runtime
+    - build
+    - configure
+
+- name: Build Python from source
+  ansible.builtin.command:
+    argv:
+      - make
+      - -j
+      - "{{ ansible_processor_vcpus | default(2) }}"
+  args:
+    chdir: "{{ python_runtime_source_dir }}"
+  when: not python_runtime_binary_stat.stat.exists
+  tags:
+    - python_runtime
+    - build
+    - compile
+
+- name: Install Python with altinstall
+  ansible.builtin.command:
+    argv:
+      - make
+      - altinstall
+  args:
+    chdir: "{{ python_runtime_source_dir }}"
+    creates: "{{ python_runtime_python_binary }}"
+  when:
+    - not python_runtime_binary_stat.stat.exists
+    - python_runtime_use_altinstall | bool
+  tags:
+    - python_runtime
+    - build
+    - install
+
+- name: Install Python with regular install if altinstall is disabled
+  ansible.builtin.command:
+    argv:
+      - make
+      - install
+  args:
+    chdir: "{{ python_runtime_source_dir }}"
+    creates: "{{ python_runtime_python_binary }}"
+  when:
+    - not python_runtime_binary_stat.stat.exists
+    - not (python_runtime_use_altinstall | bool)
+  tags:
+    - python_runtime
+    - build
+    - install
+
+- name: Create symlink for Python runtime
+  ansible.builtin.file:
+    src: "{{ python_runtime_python_binary }}"
+    dest: "{{ python_runtime_symlink_path }}"
+    state: link
+    force: true
+  when: python_runtime_create_symlink | bool
+  tags:
+    - python_runtime
+    - symlink
+
+- name: Validate installed Python runtime binary
+  ansible.builtin.command:
+    argv:
+      - "{{ python_runtime_python_binary }}"
+      - --version
+  register: python_runtime_version_check
+  changed_when: false
+  tags:
+    - python_runtime
+    - validation
+
+- name: Ensure parent directory for Python venv exists
+  ansible.builtin.file:
+    path: "{{ python_runtime_venv_path | dirname }}"
+    state: directory
+    owner: "{{ python_runtime_venv_owner }}"
+    group: "{{ python_runtime_venv_group }}"
+    mode: "0755"
+  when: python_runtime_create_venv | bool
+  tags:
+    - python_runtime
+    - venv
+
+- name: Create separate Python virtual environment
+  ansible.builtin.command:
+    argv:
+      - "{{ python_runtime_python_binary }}"
+      - -m
+      - venv
+      - "{{ python_runtime_venv_path }}"
+  args:
+    creates: "{{ python_runtime_venv_path }}/bin/activate"
+  when: python_runtime_create_venv | bool
+  tags:
+    - python_runtime
+    - venv
+
+- name: Ensure ownership of Python virtual environment
+  ansible.builtin.file:
+    path: "{{ python_runtime_venv_path }}"
+    state: directory
+    owner: "{{ python_runtime_venv_owner }}"
+    group: "{{ python_runtime_venv_group }}"
+    recurse: true
+  when: python_runtime_create_venv | bool
+  tags:
+    - python_runtime
+    - venv
+
+- name: Upgrade pip, setuptools and wheel inside venv
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest
+    virtualenv: "{{ python_runtime_venv_path }}"
+    virtualenv_command: "{{ python_runtime_python_binary }} -m venv"
+  when:
+    - python_runtime_create_venv | bool
+    - python_runtime_upgrade_pip_stack | bool
+  tags:
+    - python_runtime
+    - venv
+    - pip
+
+- name: Show final Python runtime installation output
+  ansible.builtin.debug:
+    msg:
+      - "Separate Python runtime installation completed successfully."
+      - "Installed version check output: {{ python_runtime_version_check.stdout }}"
+      - "Python binary: {{ python_runtime_python_binary }}"
+      - "Install prefix: {{ python_runtime_install_prefix }}"
+      - "System /usr/bin/python3 was not modified."
+      - "Virtual environment created by this role: {{ python_runtime_create_venv | bool }}"
+      - "Virtual environment path: {{ python_runtime_venv_path if (python_runtime_create_venv | bool) else 'not created by this role' }}"
+  tags:
+    - python_runtime
+    - validation

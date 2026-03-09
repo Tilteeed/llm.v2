@@ -1,0 +1,14 @@
+---
+# ============================================================
+# handlers/main.yml
+# Handler'ы роли ubuntu_base_nvidia_host.
+# Сейчас здесь один handler:
+# - controlled reboot после установки NVIDIA-драйвера
+# ============================================================
+
+- name: Reboot host after NVIDIA driver installation
+  ansible.builtin.reboot:
+    msg: "Reboot initiated by Ansible after NVIDIA driver installation"
+    reboot_timeout: "{{ ubuntu_nvidia_reboot_timeout }}"
+    post_reboot_delay: "{{ ubuntu_nvidia_post_reboot_delay }}"
+  listen: nvidia_driver_reboot_required

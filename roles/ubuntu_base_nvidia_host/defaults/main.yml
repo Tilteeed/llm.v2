@@ -1,0 +1,34 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли ubuntu_base_nvidia_host.
+# Эти значения можно переопределять в group_vars/host_vars.
+# ============================================================
+
+ubuntu_base_do_dist_upgrade: false
+
+ubuntu_base_packages:
+  - ca-certificates
+  - curl
+  - wget
+  - git
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - build-essential
+  - htop
+  - nvtop
+  - pciutils
+  - apt-transport-https
+  - python3
+  - python3-pip
+  - python3-venv
+  - python3-apt
+  - ubuntu-drivers-common
+
+ubuntu_nvidia_driver_install_method: auto
+ubuntu_nvidia_force_reinstall: false
+ubuntu_nvidia_reboot_timeout: 1800
+ubuntu_nvidia_post_reboot_delay: 20
+ubuntu_nvidia_manage_host_driver: true
+ubuntu_nvidia_smi_command: nvidia-smi

@@ -1,0 +1,35 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли docker_engine.
+# Эти значения можно переопределять в group_vars/host_vars.
+# ============================================================
+
+docker_engine_legacy_packages:
+  - docker.io
+  - docker-doc
+  - docker-compose
+  - docker-compose-v2
+  - podman-docker
+  - containerd
+  - runc
+
+docker_engine_prerequisite_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+
+docker_engine_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+docker_engine_group_name: docker
+
+docker_engine_group_members:
+  - ubuntu
+
+docker_engine_remove_legacy_packages: true
+docker_engine_run_hello_world_test: true

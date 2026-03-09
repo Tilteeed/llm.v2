@@ -1,0 +1,115 @@
+---
+- name: Prepare Ubuntu host for LLM workloads
+  hosts: llm_nodes
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Decide whether to use custom Python runtime
+      ansible.builtin.set_fact:
+        llm_use_custom_python: >-
+          {{
+            (llm_python_mode == 'custom')
+            or
+            (
+              llm_python_mode == 'auto'
+              and ansible_distribution == 'Ubuntu'
+              and ansible_distribution_version is version('22.04', '<')
+            )
+          }}
+
+    - name: Define selected Python binary for runtimes
+      ansible.builtin.set_fact:
+        llm_selected_python_binary: >-
+          {{
+            llm_custom_python_binary
+            if (llm_use_custom_python | bool)
+            else llm_system_python_binary
+          }}
+
+    - name: Show selected strategy
+      ansible.builtin.debug:
+        msg:
+          - "group_names={{ group_names }}"
+          - "llm_enable_gpu_stack={{ llm_enable_gpu_stack }}"
+          - "llm_manage_docker={{ llm_manage_docker }}"
+          - "llm_manage_nvidia_driver={{ llm_manage_nvidia_driver }}"
+          - "llm_manage_nvidia_container_toolkit={{ llm_manage_nvidia_container_toolkit }}"
+          - "ollama_container_use_gpu={{ ollama_container_use_gpu }}"
+          - "llm_python_mode={{ llm_python_mode }}"
+          - "llm_use_custom_python={{ llm_use_custom_python }}"
+          - "llm_selected_python_binary={{ llm_selected_python_binary }}"
+
+  roles:
+    - role: ubuntu_base_nvidia_host
+      when:
+        - llm_enable_gpu_stack | bool
+        - llm_manage_nvidia_driver | bool
+      tags:
+        - ubuntu_base_nvidia_host
+        - base
+        - nvidia_host
+
+    - role: docker_engine
+      when: llm_manage_docker | bool
+      tags:
+        - docker_engine
+        - docker
+
+    - role: nvidia_container_toolkit
+      when:
+        - llm_enable_gpu_stack | bool
+        - llm_manage_nvidia_container_toolkit | bool
+      tags:
+        - nvidia_container_toolkit
+        - nvidia_docker
+        - gpu_containers
+
+    - role: python_runtime
+      when: llm_use_custom_python | bool
+      vars:
+        python_runtime_install_prefix: "{{ llm_custom_python_binary | regex_replace('/bin/python[0-9.]+$', '') }}"
+        python_runtime_python_binary: "{{ llm_custom_python_binary }}"
+      tags:
+        - python_runtime
+        - python
+        - python311
+
+    - role: ollama_container
+      tags:
+        - ollama_container
+        - ollama
+
+    - role: ollama_pull_models
+      tags:
+        - ollama_pull_models
+        - ollama_models
+        - pull_models
+
+    - role: monitoring_stack
+      tags:
+        - monitoring_stack
+        - monitoring
+
+    - role: garak_runner
+      vars:
+        garak_runner_use_custom_python: "{{ llm_use_custom_python }}"
+        garak_runner_custom_python_binary: "{{ llm_custom_python_binary }}"
+        garak_runner_system_python_binary: "{{ llm_system_python_binary }}"
+      tags:
+        - garak_runner
+        - garak
+
+    - role: langchain_runtime
+      vars:
+        langchain_runtime_python_binary: "{{ llm_selected_python_binary }}"
+      tags:
+        - langchain_runtime
+        - langchain
+        - python_packages
+
+    - role: platform_users
+      tags:
+        - platform_users
+        - users
+        - access

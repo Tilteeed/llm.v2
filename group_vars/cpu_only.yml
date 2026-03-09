@@ -1,0 +1,12 @@
+---
+llm_enable_gpu_stack: false
+llm_manage_docker: true
+llm_manage_nvidia_driver: false
+llm_manage_nvidia_container_toolkit: false
+
+ollama_container_use_gpu: false
+
+monitoring_stack_enable_cadvisor: false
+monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro" # not work ubuntu 24.04 not GPU "/:/host:ro,rslave"
+monitoring_stack_grafana_default_dashboards:
+  - node-exporter-full.json

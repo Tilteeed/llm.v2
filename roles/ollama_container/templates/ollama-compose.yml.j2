@@ -1,0 +1,31 @@
+services:
+  ollama:
+    image: {{ ollama_container_image }}
+    container_name: {{ ollama_container_name }}
+    restart: {{ ollama_container_restart_policy }}
+
+    ports:
+      - "{{ ollama_container_bind_address }}:{{ ollama_container_host_port }}:{{ ollama_container_internal_port }}"
+
+    environment:
+      OLLAMA_HOST: "{{ ollama_container_listen_address }}"
+
+    volumes:
+      - "{{ ollama_container_data_dir }}:/root/.ollama"
+
+{% if ollama_container_use_gpu %}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+{% endif %}
+
+    networks:
+      - {{ ollama_container_network_name }}
+
+networks:
+  {{ ollama_container_network_name }}:
+    external: true

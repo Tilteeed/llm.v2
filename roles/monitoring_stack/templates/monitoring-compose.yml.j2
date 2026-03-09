@@ -1,0 +1,69 @@
+services:
+  prometheus:
+    image: {{ monitoring_stack_prometheus_image }}
+    container_name: {{ monitoring_stack_prometheus_container_name }}
+    restart: {{ monitoring_stack_restart_policy }}
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_host_port }}:9090"
+    volumes:
+      - "{{ monitoring_stack_prometheus_config_file }}:/etc/prometheus/prometheus.yml:ro"
+      - "{{ monitoring_stack_prometheus_data_dir }}:/prometheus"
+    networks:
+      - {{ monitoring_stack_network_name }}
+
+  grafana:
+    image: {{ monitoring_stack_grafana_image }}
+    container_name: {{ monitoring_stack_grafana_container_name }}
+    restart: {{ monitoring_stack_restart_policy }}
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_host_port }}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "{{ monitoring_stack_grafana_admin_user }}"
+      GF_SECURITY_ADMIN_PASSWORD: "{{ monitoring_stack_grafana_admin_password }}"
+    volumes:
+      - "{{ monitoring_stack_grafana_data_dir }}:/var/lib/grafana"
+      - "{{ monitoring_stack_grafana_datasources_dir }}:/etc/grafana/provisioning/datasources"
+      - "{{ monitoring_stack_grafana_dashboards_dir }}:/etc/grafana/provisioning/dashboards"
+    networks:
+      - {{ monitoring_stack_network_name }}
+
+  node-exporter:
+    image: {{ monitoring_stack_node_exporter_image }}
+    container_name: {{ monitoring_stack_node_exporter_container_name }}
+    restart: {{ monitoring_stack_restart_policy }}
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_node_exporter_host_port }}:9100"
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      #- "/:/host:ro,rslave"
+      - "{{ monitoring_stack_node_exporter_rootfs_mount }}"
+    networks:
+      - {{ monitoring_stack_network_name }}
+
+  {% if monitoring_stack_enable_cadvisor %}
+  cadvisor:
+    image: {{ monitoring_stack_cadvisor_image }}
+    container_name: {{ monitoring_stack_cadvisor_container_name }}
+    restart: {{ monitoring_stack_restart_policy }}
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_cadvisor_host_port }}:8080"
+    privileged: true
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:rw"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker:/var/lib/docker:ro"
+      - "/dev/disk:/dev/disk:ro"
+    devices:
+      - "/dev/kmsg:/dev/kmsg"
+    networks:
+      - {{ monitoring_stack_network_name }}
+{% endif %}
+
+networks:
+  {{ monitoring_stack_network_name }}:
+    external: true

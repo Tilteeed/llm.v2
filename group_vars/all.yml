@@ -1,0 +1,316 @@
+---
+# ============================================================
+# Общие дефолты проекта
+# Профили переопределяют только то, что отличается по сценарию.
+# ============================================================
+
+# ------------------------------
+# Управляющие флаги ролей
+# ------------------------------
+
+# Включен ли вообще GPU-стек проекта.
+# false -> CPU-only
+llm_enable_gpu_stack: true
+
+# Нужно ли ставить/настраивать Docker этой playbook'ой.
+# false -> использовать уже установленный Docker
+llm_manage_docker: true
+
+# Нужно ли управлять host NVIDIA driver.
+# true  -> cloud GPU без драйвера
+# false -> WSL2 или cloud image с уже готовым драйвером
+llm_manage_nvidia_driver: true
+
+# Нужно ли ставить/настраивать NVIDIA Container Toolkit.
+# false -> toolkit уже есть и его лучше не трогать
+llm_manage_nvidia_container_toolkit: true
+
+# ------------------------------
+# ubuntu_base_nvidia_host
+# ------------------------------
+
+ubuntu_base_do_dist_upgrade: false
+
+ubuntu_base_packages:
+  - ca-certificates
+  - curl
+  - wget
+  - git
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - build-essential
+  - htop
+  - nvtop
+  - pciutils
+  - apt-transport-https
+  - python3
+  - python3-pip
+  - python3-venv
+  - python3-apt
+  - ubuntu-drivers-common
+
+ubuntu_nvidia_smi_command: nvidia-smi
+ubuntu_nvidia_driver_install_method: auto
+ubuntu_nvidia_manage_host_driver: true
+ubuntu_nvidia_force_reinstall: false
+ubuntu_nvidia_reboot_timeout: 1800
+ubuntu_nvidia_post_reboot_delay: 20
+
+# ------------------------------
+# docker_engine
+# ------------------------------
+
+docker_engine_legacy_packages:
+  - docker.io
+  - docker-doc
+  - docker-compose
+  - docker-compose-v2
+  - podman-docker
+  - containerd
+  - runc
+
+docker_engine_prerequisite_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+
+docker_engine_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+docker_engine_group_name: docker
+docker_engine_group_members:
+  - ubuntu
+  - Alex
+  - IvanO
+  - IvanM
+  - ilya
+  - Dima
+
+docker_engine_remove_legacy_packages: true
+docker_engine_run_hello_world_test: true
+
+# ------------------------------
+# nvidia_container_toolkit
+# ------------------------------
+
+nvidia_container_toolkit_prerequisite_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+
+nvidia_container_toolkit_packages:
+  - nvidia-container-toolkit
+
+nvidia_container_toolkit_keyring_path: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+nvidia_container_toolkit_repo_list_url: https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list
+nvidia_container_toolkit_run_gpu_test: true
+nvidia_container_toolkit_test_image: nvidia/cuda:12.4.1-base-ubuntu24.04
+
+# ------------------------------
+# ollama_container
+# ------------------------------
+
+ollama_container_name: ollama
+ollama_container_image: ollama/ollama:latest
+ollama_container_network_name: llm_stack_net
+ollama_container_base_dir: /opt/llm/ollama
+ollama_container_compose_dir: "{{ ollama_container_base_dir }}/compose"
+ollama_container_data_dir: "{{ ollama_container_base_dir }}/data"
+ollama_container_compose_file: "{{ ollama_container_compose_dir }}/compose.yml"
+ollama_container_host_port: 11434
+ollama_container_internal_port: 11434
+ollama_container_bind_address: 0.0.0.0
+ollama_container_restart_policy: unless-stopped
+ollama_container_use_gpu: true
+ollama_container_listen_address: "0.0.0.0:11434"
+ollama_container_create_network: true
+ollama_container_healthcheck_retries: 30
+ollama_container_healthcheck_delay: 10
+
+# ------------------------------
+# ollama_pull_models
+# ------------------------------
+
+ollama_pull_models_container_name: "{{ ollama_container_name }}"
+ollama_pull_models_list:
+  - smollm:135m
+  #- qwen2.5:7b
+  #- llama3.1:8b
+ollama_pull_models_force: false
+ollama_pull_models_show_final_list: true
+ollama_pull_models_api_retries: 20
+ollama_pull_models_api_delay: 10
+
+# ------------------------------
+# monitoring_stack
+# ------------------------------
+
+monitoring_stack_base_dir: /opt/llm/monitoring
+monitoring_stack_compose_dir: "{{ monitoring_stack_base_dir }}/compose"
+monitoring_stack_prometheus_data_dir: "{{ monitoring_stack_base_dir }}/prometheus-data"
+monitoring_stack_grafana_data_dir: "{{ monitoring_stack_base_dir }}/grafana-data"
+
+monitoring_stack_enable_cadvisor: true
+monitoring_stack_enable_grafana_provisioning: true
+
+monitoring_stack_grafana_provisioning_dir: "{{ monitoring_stack_base_dir }}/grafana-provisioning"
+monitoring_stack_grafana_datasources_dir: "{{ monitoring_stack_grafana_provisioning_dir }}/datasources"
+monitoring_stack_grafana_dashboards_dir: "{{ monitoring_stack_grafana_provisioning_dir }}/dashboards"
+monitoring_stack_grafana_datasource_file: "{{ monitoring_stack_grafana_datasources_dir }}/prometheus.yml"
+monitoring_stack_grafana_dashboard_provider_file: "{{ monitoring_stack_grafana_dashboards_dir }}/dashboard-provider.yml"
+monitoring_stack_grafana_dashboard_json_dir: "{{ monitoring_stack_grafana_dashboards_dir }}/json"
+
+monitoring_stack_grafana_datasource_name: Prometheus
+monitoring_stack_grafana_datasource_url: http://prometheus:9090
+monitoring_stack_grafana_default_dashboards:
+  - node-exporter-full.json
+  - docker-cadvisor.json
+
+monitoring_stack_prometheus_config_file: "{{ monitoring_stack_compose_dir }}/prometheus.yml"
+monitoring_stack_compose_file: "{{ monitoring_stack_compose_dir }}/compose.yml"
+monitoring_stack_network_name: "{{ ollama_container_network_name }}"
+monitoring_stack_create_network: true
+
+monitoring_stack_prometheus_image: prom/prometheus:latest
+monitoring_stack_grafana_image: grafana/grafana:latest
+monitoring_stack_node_exporter_image: prom/node-exporter:latest
+monitoring_stack_cadvisor_image: gcr.io/cadvisor/cadvisor:latest
+
+monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro"
+
+monitoring_stack_prometheus_container_name: prometheus
+monitoring_stack_grafana_container_name: grafana
+monitoring_stack_node_exporter_container_name: node-exporter
+monitoring_stack_cadvisor_container_name: cadvisor
+
+monitoring_stack_prometheus_host_port: 9090
+monitoring_stack_grafana_host_port: 3000
+monitoring_stack_node_exporter_host_port: 9100
+monitoring_stack_cadvisor_host_port: 8081
+
+monitoring_stack_bind_address: 0.0.0.0
+monitoring_stack_restart_policy: unless-stopped
+monitoring_stack_grafana_admin_user: admin
+monitoring_stack_grafana_admin_password: admin123
+monitoring_stack_healthcheck_retries: 30
+monitoring_stack_healthcheck_delay: 10
+
+# ------------------------------
+# garak_runner
+# ------------------------------
+
+garak_runner_base_dir: /opt/llm/garak
+garak_runner_venv_dir: "{{ garak_runner_base_dir }}/venv"
+garak_runner_reports_dir: "{{ garak_runner_base_dir }}/reports"
+garak_runner_bin_dir: "{{ garak_runner_base_dir }}/bin"
+garak_runner_owner: root
+garak_runner_group: root
+garak_runner_use_custom_python: true
+garak_runner_custom_python_binary: /opt/python311/bin/python3.11
+garak_runner_system_python_binary: /usr/bin/python3
+garak_runner_pip_package: garak
+garak_runner_package_spec: "garak==0.14.0" #Фиксируем версию garak для ускорения скачивания и установки
+garak_runner_pip_cache_dir: /opt/llm/pip-cache #Добавляем кэш, для ускорения загрузки
+garak_runner_upgrade_pip_stack: true
+garak_runner_ollama_base_url: "http://127.0.0.1:{{ ollama_container_host_port }}"
+garak_runner_default_model: "qwen2.5:7b"
+garak_runner_create_helper_script: true
+garak_runner_helper_script_path: "{{ garak_runner_bin_dir }}/run_garak_ollama.sh"
+
+# ------------------------------
+# python_runtime
+# ------------------------------
+
+python_runtime_version: "3.11.9"
+python_runtime_short_version: "3.11"
+python_runtime_install_prefix: "/opt/python311"
+python_runtime_create_symlink: true
+python_runtime_symlink_path: "/usr/local/bin/python3.11"
+python_runtime_create_venv: false
+python_runtime_venv_path: "/opt/venvs/python311"
+python_runtime_venv_owner: root
+python_runtime_venv_group: root
+python_runtime_upgrade_pip_stack: true
+
+# ------------------------------
+# langchain_runtime
+# ------------------------------
+
+langchain_runtime_python_version: "3.11"
+langchain_runtime_venv_path: "/opt/venvs/langchain311"
+langchain_runtime_venv_owner: root
+langchain_runtime_venv_group: root
+langchain_runtime_upgrade_pip_stack: true
+langchain_runtime_packages:
+  - langchain
+  - langchain-community
+  - langgraph
+langchain_runtime_extra_packages: []
+langchain_runtime_install_packages: true
+
+# ------------------------------
+# platform_users
+# ------------------------------
+
+platform_users_list:
+  - name: Alex
+    comment: "Alex"
+    shell: /bin/bash
+    password_hash: "REPLACE_ME"
+  - name: IvanO
+    comment: "IvanO"
+    shell: /bin/bash
+    password_hash: "REPLACE_ME"
+  - name: IvanM
+    comment: "IvanM"
+    shell: /bin/bash
+    password_hash: "REPLACE_ME"
+  - name: ilya
+    comment: "ilya"
+    shell: /bin/bash
+    password_hash: "REPLACE_ME"
+  - name: Dima
+    comment: "Dima"
+    shell: /bin/bash
+    password_hash: "REPLACE_ME"
+
+platform_users_create_home: true
+platform_users_update_password: on_create
+platform_users_default_groups:
+  - sudo
+  - docker
+platform_users_create_shared_group: true
+platform_users_shared_group_name: llm-admins
+platform_users_add_shared_group: true
+platform_users_create_shared_directory: true
+platform_users_shared_directory_path: /opt/llm/shared
+platform_users_shared_directory_owner: root
+platform_users_shared_directory_group: "{{ platform_users_shared_group_name }}"
+platform_users_shared_directory_mode: "2775"
+platform_users_manage_sudo_group: true
+
+# ============================================================
+# Python selection strategy
+# ============================================================
+
+# Какой Python использовать для python_runtime / garak / langchain.
+#
+# Варианты:
+# - auto   -> Ubuntu 20.04 = custom Python 3.11.9
+#             Ubuntu > 20.04 = system python3
+# - custom -> всегда использовать кастомный Python
+# - system -> всегда использовать системный python3
+llm_python_mode: auto
+
+# Бинарник системного Python.
+# Для Ubuntu 22.04/24.04 и новее в auto-режиме будет использоваться он.
+llm_system_python_binary: /usr/bin/python3
+
+# Бинарник кастомного Python.
+# Для Ubuntu 20.04 в auto-режиме будет использоваться он.
+llm_custom_python_binary: /opt/python311/bin/python3.11

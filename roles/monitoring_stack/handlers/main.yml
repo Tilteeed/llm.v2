@@ -1,0 +1,17 @@
+---
+# ============================================================
+# handlers/main.yml
+# Handler'ы роли monitoring_stack.
+# ============================================================
+
+- name: Restart monitoring compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ monitoring_stack_compose_file }}"
+      - up
+      - -d
+      - --force-recreate
+  listen: monitoring_stack_restart

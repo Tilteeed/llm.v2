@@ -1,0 +1,360 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: monitoring_stack
+#
+# Что делает роль:
+# 1. Проверяет, что Docker установлен и работает.
+# 2. Создает каталоги под monitoring stack.
+# 3. Создает общую Docker-сеть при необходимости.
+# 4. Шаблонит конфиг Prometheus.
+# 5. Шаблонит docker compose файл.
+# 6. Поднимает стек мониторинга.
+# 7. Проверяет доступность Prometheus и Grafana.
+# ============================================================
+
+# ------------------------------------------------------------
+# Проверяем, что Docker CLI установлен.
+# ------------------------------------------------------------
+- name: Validate Docker CLI before monitoring deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: monitoring_stack_docker_version_check
+  changed_when: false
+  tags:
+    - monitoring
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Проверяем, что Docker daemon отвечает.
+# ------------------------------------------------------------
+- name: Validate Docker daemon before monitoring deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  register: monitoring_stack_docker_info_check
+  changed_when: false
+  tags:
+    - monitoring
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Создаем базовый каталог мониторинга.
+# ------------------------------------------------------------
+- name: Ensure monitoring base directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - monitoring
+    - filesystem
+
+# ------------------------------------------------------------
+# Создаем каталог под compose и конфиги.
+# ------------------------------------------------------------
+- name: Ensure monitoring compose directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - monitoring
+    - filesystem
+
+# ------------------------------------------------------------
+# Создаем каталог данных Prometheus.
+# ------------------------------------------------------------
+- name: Ensure Prometheus data directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_prometheus_data_dir }}"
+    state: directory
+    owner: nobody
+    group: nogroup
+    mode: "0755"
+  tags:
+    - monitoring
+    - filesystem
+    - prometheus
+
+# ------------------------------------------------------------
+# Создаем каталог данных Grafana.
+# Для Grafana часто удобно сразу дать uid/gid 472,
+# который обычно используется внутри контейнера Grafana.
+# ------------------------------------------------------------
+- name: Ensure Grafana data directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_grafana_data_dir }}"
+    state: directory
+    owner: "472"
+    group: "472"
+    mode: "0755"
+  tags:
+    - monitoring
+    - filesystem
+    - grafana
+
+# Monitoring autodashboard
+- name: Ensure Grafana provisioning base directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_grafana_provisioning_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+
+- name: Ensure Grafana datasources directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_grafana_datasources_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+
+- name: Ensure Grafana dashboards provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_grafana_dashboards_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+
+- name: Ensure Grafana dashboard JSON directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_stack_grafana_dashboard_json_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+
+- name: Render Grafana Prometheus datasource provisioning file
+  ansible.builtin.template:
+    src: grafana-datasource-prometheus.yml.j2
+    dest: "{{ monitoring_stack_grafana_datasource_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  notify: monitoring_stack_restart
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+
+- name: Render Grafana dashboard provider provisioning file
+  ansible.builtin.template:
+    src: grafana-dashboard-provider.yml.j2
+    dest: "{{ monitoring_stack_grafana_dashboard_provider_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  notify: monitoring_stack_restart
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+
+- name: Copy bundled Grafana dashboard JSON files
+  ansible.builtin.copy:
+    src: "dashboards/{{ item }}"
+    dest: "{{ monitoring_stack_grafana_dashboard_json_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ monitoring_stack_grafana_default_dashboards }}"
+  when: monitoring_stack_enable_grafana_provisioning | bool
+  notify: monitoring_stack_restart
+  tags:
+    - monitoring
+    - grafana
+    - provisioning
+# ------------------------------------------------------------
+# Проверяем существование общей Docker-сети.
+# ------------------------------------------------------------
+- name: Check whether monitoring Docker network already exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ monitoring_stack_network_name }}"
+  register: monitoring_stack_network_check
+  changed_when: false
+  failed_when: false
+  when: monitoring_stack_create_network | bool
+  tags:
+    - monitoring
+    - network
+
+# ------------------------------------------------------------
+# Создаем сеть, если ее нет.
+# ------------------------------------------------------------
+- name: Create monitoring Docker network
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - create
+      - "{{ monitoring_stack_network_name }}"
+  when:
+    - monitoring_stack_create_network | bool
+    - monitoring_stack_network_check.rc != 0
+  register: monitoring_stack_network_create
+  changed_when: true
+  tags:
+    - monitoring
+    - network
+
+# ------------------------------------------------------------
+# Шаблоним конфигурацию Prometheus.
+# Если конфиг изменился, перезапускаем стек.
+# ------------------------------------------------------------
+- name: Render Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_stack_prometheus_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: monitoring_stack_restart
+  tags:
+    - monitoring
+    - prometheus
+    - config
+
+# ------------------------------------------------------------
+# Шаблоним compose-файл мониторинга.
+# ------------------------------------------------------------
+- name: Render monitoring docker compose file
+  ansible.builtin.template:
+    src: monitoring-compose.yml.j2
+    dest: "{{ monitoring_stack_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: monitoring_stack_restart
+  tags:
+    - monitoring
+    - compose
+    - config
+
+# ------------------------------------------------------------
+# Запускаем стек мониторинга.
+# ------------------------------------------------------------
+- name: Start monitoring compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ monitoring_stack_compose_file }}"
+      - up
+      - -d
+  register: monitoring_stack_compose_up
+  changed_when: >
+    'Started' in monitoring_stack_compose_up.stdout
+    or 'Creating' in monitoring_stack_compose_up.stdout
+    or 'Recreating' in monitoring_stack_compose_up.stdout
+  tags:
+    - monitoring
+    - compose
+    - deploy
+
+# ------------------------------------------------------------
+# Если шаблоны изменились, применяем handler сразу,
+# чтобы ниже проверять уже актуальный стек.
+# ------------------------------------------------------------
+- name: Flush handlers to restart monitoring stack immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - monitoring
+    - compose
+    - deploy
+
+# ------------------------------------------------------------
+# Проверяем доступность Prometheus.
+# ------------------------------------------------------------
+- name: Wait until Prometheus becomes available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ monitoring_stack_prometheus_host_port }}/-/ready"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 10
+  register: monitoring_stack_prometheus_check
+  retries: "{{ monitoring_stack_healthcheck_retries }}"
+  delay: "{{ monitoring_stack_healthcheck_delay }}"
+  until: monitoring_stack_prometheus_check.status == 200
+  changed_when: false
+  tags:
+    - monitoring
+    - validation
+    - prometheus
+
+# ------------------------------------------------------------
+# Проверяем доступность Grafana.
+# Логин не требуется для самого health endpoint.
+# ------------------------------------------------------------
+- name: Wait until Grafana becomes available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ monitoring_stack_grafana_host_port }}/api/health"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 10
+  register: monitoring_stack_grafana_check
+  retries: "{{ monitoring_stack_healthcheck_retries }}"
+  delay: "{{ monitoring_stack_healthcheck_delay }}"
+  until: monitoring_stack_grafana_check.status == 200
+  changed_when: false
+  tags:
+    - monitoring
+    - validation
+    - grafana
+
+# ------------------------------------------------------------
+# Финальный вывод.
+# ------------------------------------------------------------
+- name: Show final monitoring stack validation output
+  ansible.builtin.debug:
+    msg:
+      - "Monitoring stack deployment completed successfully."
+      - "Prometheus URL: http://{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_host_port }}"
+      - "Grafana URL: http://{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_host_port }}"
+      - "Node Exporter URL: http://{{ monitoring_stack_bind_address }}:{{ monitoring_stack_node_exporter_host_port }}/metrics"
+      - "{{ 'cAdvisor URL: http://' ~ monitoring_stack_bind_address ~ ':' ~ monitoring_stack_cadvisor_host_port if (monitoring_stack_enable_cadvisor | bool) else 'cAdvisor: disabled' }}"
+      - "Grafana admin user: {{ monitoring_stack_grafana_admin_user }}"
+      - "Remember to move Grafana password to Ansible Vault later."
+  tags:
+    - monitoring
+    - validation

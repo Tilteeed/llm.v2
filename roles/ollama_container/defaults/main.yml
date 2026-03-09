@@ -1,0 +1,26 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли ollama_container.
+# ============================================================
+
+ollama_container_name: ollama
+ollama_container_image: ollama/ollama:latest
+ollama_container_network_name: llm_stack_net
+
+ollama_container_base_dir: /opt/llm/ollama
+ollama_container_compose_dir: "{{ ollama_container_base_dir }}/compose"
+ollama_container_data_dir: "{{ ollama_container_base_dir }}/data"
+ollama_container_compose_file: "{{ ollama_container_compose_dir }}/compose.yml"
+
+ollama_container_host_port: 11434
+ollama_container_internal_port: 11434
+ollama_container_bind_address: 0.0.0.0
+ollama_container_restart_policy: unless-stopped
+
+ollama_container_use_gpu: true
+ollama_container_listen_address: "0.0.0.0:11434"
+ollama_container_create_network: true
+
+ollama_container_healthcheck_retries: 30
+ollama_container_healthcheck_delay: 10

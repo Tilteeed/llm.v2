@@ -1,0 +1,58 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли monitoring_stack.
+# ============================================================
+
+monitoring_stack_base_dir: /opt/llm/monitoring
+monitoring_stack_compose_dir: "{{ monitoring_stack_base_dir }}/compose"
+monitoring_stack_prometheus_data_dir: "{{ monitoring_stack_base_dir }}/prometheus-data"
+monitoring_stack_grafana_data_dir: "{{ monitoring_stack_base_dir }}/grafana-data"
+
+monitoring_stack_prometheus_config_file: "{{ monitoring_stack_compose_dir }}/prometheus.yml"
+monitoring_stack_compose_file: "{{ monitoring_stack_compose_dir }}/compose.yml"
+
+monitoring_stack_network_name: llm_stack_net
+monitoring_stack_create_network: true
+
+monitoring_stack_prometheus_image: prom/prometheus:latest
+monitoring_stack_grafana_image: grafana/grafana:latest
+monitoring_stack_node_exporter_image: prom/node-exporter:latest
+monitoring_stack_cadvisor_image: gcr.io/cadvisor/cadvisor:latest
+
+monitoring_stack_enable_cadvisor: true
+monitoring_stack_prometheus_container_name: prometheus
+monitoring_stack_grafana_container_name: grafana
+monitoring_stack_node_exporter_container_name: node-exporter
+monitoring_stack_cadvisor_container_name: cadvisor
+
+monitoring_stack_prometheus_host_port: 9090
+monitoring_stack_grafana_host_port: 3000
+monitoring_stack_node_exporter_host_port: 9100
+monitoring_stack_cadvisor_host_port: 8081
+
+monitoring_stack_bind_address: 0.0.0.0
+monitoring_stack_restart_policy: unless-stopped
+
+monitoring_stack_grafana_admin_user: admin
+monitoring_stack_grafana_admin_password: admin123
+
+monitoring_stack_healthcheck_retries: 30
+monitoring_stack_healthcheck_delay: 10
+monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro,rslave" #for VM with GPU
+monitoring_stack_enable_grafana_provisioning: true
+
+monitoring_stack_grafana_provisioning_dir: "{{ monitoring_stack_base_dir }}/grafana-provisioning"
+monitoring_stack_grafana_datasources_dir: "{{ monitoring_stack_grafana_provisioning_dir }}/datasources"
+monitoring_stack_grafana_dashboards_dir: "{{ monitoring_stack_grafana_provisioning_dir }}/dashboards"
+
+monitoring_stack_grafana_datasource_file: "{{ monitoring_stack_grafana_datasources_dir }}/prometheus.yml"
+monitoring_stack_grafana_dashboard_provider_file: "{{ monitoring_stack_grafana_dashboards_dir }}/dashboard-provider.yml"
+monitoring_stack_grafana_dashboard_json_dir: "{{ monitoring_stack_grafana_dashboards_dir }}/json"
+
+monitoring_stack_grafana_datasource_name: Prometheus
+monitoring_stack_grafana_datasource_url: http://prometheus:9090
+
+monitoring_stack_grafana_default_dashboards:
+  - node-exporter-full.json
+  - docker-cadvisor.json

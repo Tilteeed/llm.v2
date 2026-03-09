@@ -1,0 +1,17 @@
+---
+# ============================================================
+# handlers/main.yml
+# Handler'ы роли ollama_container.
+# ============================================================
+
+- name: Restart Ollama compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ ollama_container_compose_file }}"
+      - up
+      - -d
+      - --force-recreate
+  listen: ollama_container_restart_stack

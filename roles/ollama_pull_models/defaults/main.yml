@@ -1,0 +1,17 @@
+---
+# ============================================================
+# defaults/main.yml
+# Значения по умолчанию для роли ollama_pull_models.
+# ============================================================
+
+ollama_pull_models_container_name: ollama
+
+ollama_pull_models_list:
+  - qwen2.5:7b
+
+ubuntu_nvidia_manage_host_driver: true
+ollama_pull_models_force: false
+ollama_pull_models_show_final_list: true
+
+ollama_pull_models_api_retries: 20
+ollama_pull_models_api_delay: 10

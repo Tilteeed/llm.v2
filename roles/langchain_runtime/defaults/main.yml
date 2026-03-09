@@ -1,0 +1,34 @@
+---
+# ============================================================
+# defaults/main.yml
+# Роль: langchain_runtime
+#
+# Значения по умолчанию для создания отдельного venv и
+# установки LangChain-стека.
+# ============================================================
+
+# Версия Python, которой создается LangChain venv.
+# Эта версия уже должна быть установлена на хосте, например
+# ролью python_runtime.
+# ============================================================
+# defaults/main.yml
+# Роль: langchain_runtime
+# ============================================================
+
+langchain_runtime_python_version: "3.11"
+langchain_runtime_python_binary: "/opt/python311/bin/python3.11"
+
+langchain_runtime_venv_path: "/opt/venvs/langchain311"
+langchain_runtime_venv_owner: root
+langchain_runtime_venv_group: root
+
+langchain_runtime_upgrade_pip_stack: true
+
+langchain_runtime_packages:
+  - langchain
+  - langchain-community
+  - langgraph
+
+langchain_runtime_extra_packages: []
+
+langchain_runtime_install_packages: true
