@@ -39,15 +39,17 @@
           - "llm_python_mode={{ llm_python_mode }}"
           - "llm_use_custom_python={{ llm_use_custom_python }}"
           - "llm_selected_python_binary={{ llm_selected_python_binary }}"
-
+    
   roles:
-    - role: ubuntu_base_nvidia_host
-      when:
-        - llm_enable_gpu_stack | bool
-        - llm_manage_nvidia_driver | bool
+    - role: ubuntu_base
       tags:
-        - ubuntu_base_nvidia_host
+        - ubuntu_base
         - base
+
+    - role: ubuntu_base_nvidia_host
+      when: llm_enable_gpu_stack | bool
+      tags:
+        - ubuntu_nvidia_host
         - nvidia_host
 
     - role: docker_engine

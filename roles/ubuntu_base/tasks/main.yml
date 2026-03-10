@@ -1,0 +1,68 @@
+# ============================================================
+# tasks/main.yml
+# Роль: ubuntu_base
+#
+# Что делает роль:
+# 1. Проверяет, что хост действительно Ubuntu.
+# 2. Обновляет apt cache.
+# 3. По желанию делает dist-upgrade.
+# 4. Ставит базовые пакеты и Python-инструменты.
+# ============================================================
+# ------------------------------------------------------------
+# Safety check: роль написана именно под Ubuntu.
+# Если запустить ее на другом дистрибутиве, мы специально
+# завершаем выполнение с понятной ошибкой.
+# ------------------------------------------------------------
+- name: Fail if target host is not Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+    fail_msg: >-
+      This role supports Ubuntu only.
+      Current distribution: {{ ansible_distribution }}
+    success_msg: >-
+      Ubuntu detected. Continuing with base preparation and NVIDIA host driver installation.
+  tags:
+    - always
+
+# ------------------------------------------------------------
+# Обновляем apt cache.
+# Это безопасный шаг и нужен почти всегда перед установкой пакетов.
+# ------------------------------------------------------------
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  tags:
+    - apt
+    - packages
+
+# ------------------------------------------------------------
+# Опциональный dist-upgrade.
+# По умолчанию выключен, потому что может потянуть ядро,
+# системные библиотеки и вызвать нежелательные побочные эффекты.
+# Включать только осознанно через переменную:
+# ubuntu_base_do_dist_upgrade: true
+# ------------------------------------------------------------
+- name: Perform distribution upgrade only if explicitly enabled
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+  when: ubuntu_base_do_dist_upgrade | bool
+  tags:
+    - apt
+    - packages
+    - upgrade
+
+# ------------------------------------------------------------
+# Ставим базовые утилиты, python3, pip, venv и инструменты,
+# нужные для установки и диагностики драйверов.
+# ------------------------------------------------------------
+- name: Install base packages and Python tooling
+  ansible.builtin.apt:
+    name: "{{ ubuntu_base_packages }}"
+    state: present
+  tags:
+    - apt
+    - packages
+    - python

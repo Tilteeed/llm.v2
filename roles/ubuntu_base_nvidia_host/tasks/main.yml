@@ -1,83 +1,22 @@
 ---
 # ============================================================
 # tasks/main.yml
-# Роль: ubuntu_base_nvidia_host
+# Роль: ubuntu_nvidia_host
 #
 # Что делает роль:
-# 1. Проверяет, что хост действительно Ubuntu.
-# 2. Обновляет apt cache.
-# 3. По желанию делает dist-upgrade (по умолчанию выключено).
-# 4. Ставит базовые пакеты и Python-инструменты.
-# 5. Проверяет доступность GPU:
+# 1. Проверяет доступность GPU:
 #    - для обычной Ubuntu VM через lspci и nvidia-smi
 #    - для WSL2 через nvidia-smi по специальному пути
-# 6. Если это обычная VM и драйвер не работает, ставит его через
+# 2. Если это обычная VM и драйвер не работает, ставит его через
 #    ubuntu-drivers autoinstall.
-# 7. При необходимости инициирует reboot.
-# 8. После reboot проверяет:
+# 3. При необходимости инициирует reboot.
+# 4. После reboot проверяет:
 #    - nvidia-smi
 #    - наличие информации о GPU в /proc/driver/nvidia/gpus
 #      (только для обычной Ubuntu VM, не для WSL2)
 # ============================================================
 
-# ------------------------------------------------------------
-# Safety check: роль написана именно под Ubuntu.
-# Если запустить ее на другом дистрибутиве, мы специально
-# завершаем выполнение с понятной ошибкой.
-# ------------------------------------------------------------
-- name: Fail if target host is not Ubuntu
-  ansible.builtin.assert:
-    that:
-      - ansible_distribution == "Ubuntu"
-    fail_msg: >-
-      This role supports Ubuntu only.
-      Current distribution: {{ ansible_distribution }}
-    success_msg: >-
-      Ubuntu detected. Continuing with base preparation and NVIDIA host driver installation.
-  tags:
-    - always
 
-# ------------------------------------------------------------
-# Обновляем apt cache.
-# Это безопасный шаг и нужен почти всегда перед установкой пакетов.
-# ------------------------------------------------------------
-- name: Update apt package cache
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
-  tags:
-    - apt
-    - packages
-
-# ------------------------------------------------------------
-# Опциональный dist-upgrade.
-# По умолчанию выключен, потому что может потянуть ядро,
-# системные библиотеки и вызвать нежелательные побочные эффекты.
-# Включать только осознанно через переменную:
-# ubuntu_base_do_dist_upgrade: true
-# ------------------------------------------------------------
-- name: Perform distribution upgrade only if explicitly enabled
-  ansible.builtin.apt:
-    upgrade: dist
-    update_cache: true
-  when: ubuntu_base_do_dist_upgrade | bool
-  tags:
-    - apt
-    - packages
-    - upgrade
-
-# ------------------------------------------------------------
-# Ставим базовые утилиты, python3, pip, venv и инструменты,
-# нужные для установки и диагностики драйверов.
-# ------------------------------------------------------------
-- name: Install base packages and Python tooling
-  ansible.builtin.apt:
-    name: "{{ ubuntu_base_packages }}"
-    state: present
-  tags:
-    - apt
-    - packages
-    - python
 
 # ------------------------------------------------------------
 # Дополнительная проверка PCI-устройств.
