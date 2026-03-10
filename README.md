@@ -1,5 +1,3 @@
-<img width="1100" height="645" alt="image" src="https://github.com/user-attachments/assets/6a68fe7a-bac0-42e5-8290-7943bbb04201" />
-
 # Что это за проект?
 
 `llm.v2` — это Ansible-проект для подготовки Ubuntu-хоста под LLM workloads и связанные сервисы.
