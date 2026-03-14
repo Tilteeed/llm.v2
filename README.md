@@ -329,8 +329,8 @@ cpu-host ansible_host=192.168.56.50 ansible_user=Alexander
 - `system` — всегда использовать системный python3.
 
 Логика режима auto в текущем проекте такая:
-- для Ubuntu ниже 22.04 выбирается кастомный Python;
-- для Ubuntu 22.04 и выше выбирается системный Python.
+- для Ubuntu ниже 24.04 выбирается кастомный Python;
+- для Ubuntu 24.04 и выше выбирается системный Python.
 
 В `pre_tasks` playbook делает 2 шага:
 
@@ -941,9 +941,9 @@ Garak в проекте ставится в отдельный venv, а не в 
     
 - `llm_python_mode: auto`
         
-  - Ubuntu **ниже 22.04** → используется **кастомный Python**
+  - Ubuntu **ниже 24.04** → используется **кастомный Python**
             
-  - Ubuntu **22.04 и выше** → используется **системный Python**
+  - Ubuntu **24.04 и выше** → используется **системный Python**
             
 - `llm_python_mode: custom` → всегда кастомный Python
         
@@ -1098,7 +1098,7 @@ qwen2.5:7b
   * `llm_python_mode: auto`
 
     * Ubuntu **20.04** → используется **кастомный Python**
-    * Ubuntu **выше 20.04** → используется **системный Python**
+    * Ubuntu **выше 22.04** → используется **системный Python**
   * `llm_python_mode: custom` → всегда кастомный Python
   * `llm_python_mode: system` → всегда системный Python.
 
