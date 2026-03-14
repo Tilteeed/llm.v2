@@ -1,0 +1,194 @@
+---
+- name: Validate Docker CLI before Ollama Web UI deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: ollama_webui_docker_version_check
+  changed_when: false
+  tags:
+    - ollama_webui
+    - validation
+    - prereq
+
+- name: Validate Docker daemon before Ollama Web UI deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  register: ollama_webui_docker_info_check
+  changed_when: false
+  tags:
+    - ollama_webui
+    - validation
+    - prereq
+
+- name: Ensure Ollama Web UI base directory exists
+  ansible.builtin.file:
+    path: "{{ ollama_webui_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - ollama_webui
+    - filesystem
+
+- name: Ensure Ollama Web UI compose directory exists
+  ansible.builtin.file:
+    path: "{{ ollama_webui_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - ollama_webui
+    - filesystem
+
+- name: Ensure Ollama Web UI data directory exists
+  ansible.builtin.file:
+    path: "{{ ollama_webui_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - ollama_webui
+    - filesystem
+    - data
+
+- name: Check whether required Docker network exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ ollama_webui_network_name }}"
+  register: ollama_webui_network_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - ollama_webui
+    - network
+
+- name: Fail if required Docker network is missing
+  ansible.builtin.assert:
+    that:
+      - ollama_webui_network_check.rc == 0
+    fail_msg: >-
+      Required Docker network {{ ollama_webui_network_name }} was not found.
+      Deploy ollama_container first or ensure the shared network exists.
+    success_msg: >-
+      Docker network {{ ollama_webui_network_name }} exists.
+  tags:
+    - ollama_webui
+    - network
+    - validation
+
+- name: Render Ollama Web UI docker compose file
+  ansible.builtin.template:
+    src: ollama-webui-compose.yml.j2
+    dest: "{{ ollama_webui_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: ollama_webui_restart_stack
+  tags:
+    - ollama_webui
+    - compose
+
+- name: Pull Ollama Web UI image explicitly
+  ansible.builtin.command:
+    argv:
+      - docker
+      - pull
+      - "{{ ollama_webui_image }}"
+  register: ollama_webui_pull
+  changed_when: >-
+    'Downloaded newer image' in ollama_webui_pull.stdout or
+    'Pull complete' in ollama_webui_pull.stdout or
+    'Status: Downloaded newer image' in ollama_webui_pull.stdout or
+    'Status: Image is up to date for' in ollama_webui_pull.stdout
+  async: 1800
+  poll: 10
+  tags:
+    - ollama_webui
+    - deploy
+    - image
+
+- name: Start Ollama Web UI compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ ollama_webui_compose_file }}"
+      - up
+      - -d
+  register: ollama_webui_compose_up
+  changed_when: >-
+    'Started' in ollama_webui_compose_up.stdout or
+    'Creating' in ollama_webui_compose_up.stdout or
+    'Recreating' in ollama_webui_compose_up.stdout
+  tags:
+    - ollama_webui
+    - compose
+    - deploy
+
+- name: Flush handlers to restart Ollama Web UI stack immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - ollama_webui
+    - compose
+    - deploy
+
+- name: Inspect Ollama Web UI container running state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{{ '{{.State.Running}}' }}"
+      - "{{ ollama_webui_container_name }}"
+  register: ollama_webui_running_state
+  changed_when: false
+  retries: 10
+  delay: 5
+  until: ollama_webui_running_state.stdout == "true"
+  tags:
+    - ollama_webui
+    - validation
+    - deploy
+
+- name: Wait until Ollama Web UI becomes available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ollama_webui_host_port }}/"
+    method: GET
+    return_content: false
+    status_code: 200
+    timeout: 10
+  register: ollama_webui_http_check
+  retries: "{{ ollama_webui_healthcheck_retries }}"
+  delay: "{{ ollama_webui_healthcheck_delay }}"
+  until: ollama_webui_http_check.status == 200
+  changed_when: false
+  tags:
+    - ollama_webui
+    - validation
+    - healthcheck
+
+- name: Show final Ollama Web UI deployment validation output
+  ansible.builtin.debug:
+    msg:
+      - "Ollama Web UI deployment completed successfully."
+      - "Container name: {{ ollama_webui_container_name }}"
+      - "Image: {{ ollama_webui_image }}"
+      - "UI bind address: {{ ollama_webui_bind_address }}"
+      - "UI published port: {{ ollama_webui_host_port }}"
+      - "Local validation URL: http://127.0.0.1:{{ ollama_webui_host_port }}/"
+      - "Ollama API backend target: {{ ollama_webui_ollama_api_base_url }}"
+      - "Docker network: {{ ollama_webui_network_name }}"
+      - "Data directory on host: {{ ollama_webui_data_dir }}"
+  tags:
+    - ollama_webui
+    - validation

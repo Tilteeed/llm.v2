@@ -1,0 +1,85 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: python_project_packages
+# ============================================================
+
+- name: Fail if selected Python binary is not defined
+  ansible.builtin.assert:
+    that:
+      - python_project_packages_python_binary is defined
+      - python_project_packages_python_binary | length > 0
+    fail_msg: >-
+      python_project_packages_python_binary is not defined.
+      Pass the selected Python binary from site.yml.
+    success_msg: >-
+      Python binary variable is defined.
+
+- name: Check selected Python binary
+  ansible.builtin.stat:
+    path: "{{ python_project_packages_python_binary }}"
+  register: python_project_packages_python_binary_stat
+
+- name: Fail if selected Python binary does not exist
+  ansible.builtin.assert:
+    that:
+      - python_project_packages_python_binary_stat.stat.exists
+      - python_project_packages_python_binary_stat.stat.isreg
+    fail_msg: >-
+      Selected Python binary was not found:
+      {{ python_project_packages_python_binary }}
+    success_msg: >-
+      Selected Python binary exists:
+      {{ python_project_packages_python_binary }}
+
+- name: Ensure parent directory for project venv exists
+  ansible.builtin.file:
+    path: "{{ python_project_packages_venv_path | dirname }}"
+    state: directory
+    owner: "{{ python_project_packages_venv_owner }}"
+    group: "{{ python_project_packages_venv_group }}"
+    mode: "0755"
+
+- name: Create project venv if missing
+  ansible.builtin.command:
+    argv:
+      - "{{ python_project_packages_python_binary }}"
+      - -m
+      - venv
+      - "{{ python_project_packages_venv_path }}"
+  args:
+    creates: "{{ python_project_packages_venv_path }}/bin/activate"
+
+- name: Ensure project venv ownership
+  ansible.builtin.file:
+    path: "{{ python_project_packages_venv_path }}"
+    state: directory
+    owner: "{{ python_project_packages_venv_owner }}"
+    group: "{{ python_project_packages_venv_group }}"
+    recurse: true
+
+- name: Upgrade pip stack inside project venv
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest
+    executable: "{{ python_project_packages_venv_path }}/bin/pip"
+  when: python_project_packages_upgrade_pip_stack | bool
+
+- name: Install extra Python packages for project venv
+  ansible.builtin.pip:
+    name: "{{ llm_python_extra_packages }}"
+    state: present
+    executable: "{{ python_project_packages_venv_path }}/bin/pip"
+  when: llm_python_extra_packages | length > 0
+
+- name: Show final project venv info
+  ansible.builtin.debug:
+    msg:
+      - "Project Python binary: {{ python_project_packages_python_binary }}"
+      - "Project venv path: {{ python_project_packages_venv_path }}"
+      - "Extra packages configured: {{ llm_python_extra_packages | join(', ') if (llm_python_extra_packages | length > 0) else 'none' }}"
+      - "Use with: source {{ python_project_packages_venv_path }}/bin/activate"
+      - "Or directly: {{ python_project_packages_venv_path }}/bin/python --version"

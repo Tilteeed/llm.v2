@@ -69,6 +69,48 @@
     - nvidia
     - validation
 
+## ------------------------------------------------------------
+# Для WSL2 хотим, чтобы nvidia-smi был доступен как обычная
+# команда без полного пути.
+# Если найден /usr/lib/wsl/lib/nvidia-smi, создаем symlink:
+# /usr/bin/nvidia-smi -> /usr/lib/wsl/lib/nvidia-smi
+# ------------------------------------------------------------
+- name: Check WSL nvidia-smi real binary
+  ansible.builtin.stat:
+    path: /usr/lib/wsl/lib/nvidia-smi
+  register: ubuntu_nvidia_wsl_smi_stat
+  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  tags:
+    - nvidia
+    - validation
+
+- name: Fail if WSL nvidia-smi binary is missing
+  ansible.builtin.assert:
+    that:
+      - ubuntu_nvidia_wsl_smi_stat.stat.exists
+      - ubuntu_nvidia_wsl_smi_stat.stat.isreg or ubuntu_nvidia_wsl_smi_stat.stat.islnk
+    fail_msg: >-
+      WSL NVIDIA SMI binary was not found at /usr/lib/wsl/lib/nvidia-smi.
+      Cannot create standard nvidia-smi command symlink.
+    success_msg: >-
+      WSL NVIDIA SMI binary exists. Proceeding with symlink creation.
+  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  tags:
+    - nvidia
+    - validation
+
+- name: Create WSL nvidia-smi symlink in standard command path
+  ansible.builtin.file:
+    src: /usr/lib/wsl/lib/nvidia-smi
+    dest: /usr/bin/nvidia-smi
+    state: link
+    force: true
+  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  tags:
+    - nvidia
+    - validation
+
+
 # ------------------------------------------------------------
 # Проверяем, работает ли nvidia-smi уже сейчас.
 # Для обычной VM это помогает понять, нужен ли install driver.

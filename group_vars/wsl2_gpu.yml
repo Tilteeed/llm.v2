@@ -5,7 +5,9 @@ llm_manage_nvidia_driver: false
 llm_manage_nvidia_container_toolkit: true
 
 ubuntu_nvidia_manage_host_driver: false
-ubuntu_nvidia_smi_command: /usr/lib/wsl/lib/nvidia-smi
+ubuntu_nvidia_smi_command: nvidia-smi
+#ubuntu_nvidia_smi_wsl_real_path: /usr/lib/wsl/lib/nvidia-smi
+#ubuntu_nvidia_smi_wsl_symlink_path: /usr/bin/nvidia-smi
 
 nvidia_container_toolkit_test_image: nvidia/cuda:12.4.1-base-ubuntu22.04
 

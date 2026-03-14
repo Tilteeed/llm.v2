@@ -77,10 +77,25 @@
         - python
         - python311
 
+    - role: python_project_packages #new role for LLMOPs
+      vars:
+        python_project_packages_python_binary: "{{ llm_selected_python_binary }}"
+      tags:
+        - python_project_packages
+        - python_packages
+        - project_python
+
     - role: ollama_container
       tags:
         - ollama_container
         - ollama
+
+    - role: ollama_webui
+      when: ollama_webui_enable | bool
+      tags:
+        - ollama_webui
+        - webui
+        - ui
 
     - role: ollama_pull_models
       tags:

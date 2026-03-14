@@ -238,6 +238,27 @@ python_runtime_venv_group: root
 python_runtime_upgrade_pip_stack: true
 
 # ------------------------------
+# python_project_packages
+# ------------------------------
+python_project_packages_venv_path: /opt/venvs/project311
+python_project_packages_venv_owner: root
+python_project_packages_venv_group: root
+python_project_packages_upgrade_pip_stack: true
+
+llm_python_extra_packages: []
+# Пример:
+# llm_python_extra_packages:
+#   - transformers
+#   - datasets
+#   - accelerate
+#   - peft
+#   - trl
+#
+# При необходимости можно указывать версии:
+#   - transformers==4.51.3
+#   - datasets>=3.0.0
+
+# ------------------------------
 # langchain_runtime
 # ------------------------------
 
@@ -314,3 +335,27 @@ llm_system_python_binary: /usr/bin/python3
 # Бинарник кастомного Python.
 # Для Ubuntu 20.04 в auto-режиме будет использоваться он.
 llm_custom_python_binary: /opt/python311/bin/python3.11
+
+# ------------------------------
+# ollama_webui
+# ------------------------------
+ollama_webui_enable: true
+
+ollama_webui_container_name: ollama-webui
+ollama_webui_image: ghcr.io/ollama-webui/ollama-webui:main
+
+ollama_webui_base_dir: /opt/llm/ollama-webui
+ollama_webui_compose_dir: "{{ ollama_webui_base_dir }}/compose"
+ollama_webui_data_dir: "{{ ollama_webui_base_dir }}/data"
+ollama_webui_compose_file: "{{ ollama_webui_compose_dir }}/compose.yml"
+
+ollama_webui_host_port: 8000
+ollama_webui_internal_port: 8080
+ollama_webui_bind_address: 0.0.0.0
+ollama_webui_restart_policy: unless-stopped
+
+ollama_webui_network_name: "{{ ollama_container_network_name }}"
+ollama_webui_ollama_api_base_url: "http://{{ ollama_container_name }}:{{ ollama_container_internal_port }}/api"
+
+ollama_webui_healthcheck_retries: 30
+ollama_webui_healthcheck_delay: 10

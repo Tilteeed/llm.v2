@@ -1,0 +1,17 @@
+services:
+  ollama-webui:
+    image: {{ ollama_webui_image }}
+    container_name: {{ ollama_webui_container_name }}
+    restart: {{ ollama_webui_restart_policy }}
+    ports:
+      - "{{ ollama_webui_bind_address }}:{{ ollama_webui_host_port }}:{{ ollama_webui_internal_port }}"
+    environment:
+      OLLAMA_API_BASE_URL: "{{ ollama_webui_ollama_api_base_url }}"
+    volumes:
+      - "{{ ollama_webui_data_dir }}:/app/backend/data"
+    networks:
+      - {{ ollama_webui_network_name }}
+
+networks:
+  {{ ollama_webui_network_name }}:
+    external: true

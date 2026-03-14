@@ -1,0 +1,10 @@
+---
+- name: ollama_webui_restart_stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ ollama_webui_compose_file }}"
+      - up
+      - -d

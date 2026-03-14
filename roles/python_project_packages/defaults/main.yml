@@ -1,0 +1,18 @@
+---
+# ============================================================
+# defaults/main.yml
+# Роль: python_project_packages
+#
+# Что делает роль:
+# 1. Создает отдельный project venv на выбранном Python.
+# 2. При необходимости обновляет pip/setuptools/wheel.
+# 3. Ставит дополнительные Python-пакеты проекта.
+# ============================================================
+
+python_project_packages_python_binary: /usr/bin/python3
+python_project_packages_venv_path: /opt/venvs/project311
+python_project_packages_venv_owner: root
+python_project_packages_venv_group: root
+python_project_packages_upgrade_pip_stack: true
+
+llm_python_extra_packages: []

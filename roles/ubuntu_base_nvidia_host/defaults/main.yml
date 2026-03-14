@@ -5,7 +5,7 @@
 # Эти значения можно переопределять в group_vars/host_vars.
 # ============================================================
 
-ubuntu_base_do_dist_upgrade: false
+ubuntu_base_do_dist_upgrade: false #upgrade
 
 ubuntu_base_packages:
   - ca-certificates
@@ -30,5 +30,5 @@ ubuntu_nvidia_driver_install_method: auto
 ubuntu_nvidia_force_reinstall: false
 ubuntu_nvidia_reboot_timeout: 1800
 ubuntu_nvidia_post_reboot_delay: 20
-ubuntu_nvidia_manage_host_driver: true
+ubuntu_nvidia_manage_host_driver: false #Установка драйверов Nvidia
 ubuntu_nvidia_smi_command: nvidia-smi
