@@ -379,7 +379,7 @@ ansible-playbook site.yml #Запускаем плейбук
 
 # Роли проекта
 
-В `site.yml` сейчас подключены **11 ролей**:
+В `site.yml` сейчас подключены **13 ролей**:
 
 - `ubuntu_base`
 - `ubuntu_base_nvidia_host`
@@ -392,6 +392,8 @@ ansible-playbook site.yml #Запускаем плейбук
 - `garak_runner`
 - `langchain_runtime`
 - `platform_users`
+- `python_project_packages`
+- `ollama_webui`
 
 `ubuntu_base`:
 - базовая подготовка Ubuntu;
@@ -404,6 +406,7 @@ ansible-playbook site.yml #Запускаем плейбук
 - проверяет доступность GPU;
 - в обычном Linux-сценарии может ставить NVIDIA driver;
 - в WSL2 работает в отдельном совместимом режиме.
+- в WSL2 дополнительно создаёт symlink `nvidia-smi`, чтобы команда была доступна как обычная системная команда.
         
 `docker_engine`
 - подключает официальный Docker repository;
@@ -421,6 +424,13 @@ ansible-playbook site.yml #Запускаем плейбук
 - устанавливает его в отдельный prefix;
 - не заменяет системный `/usr/bin/python3`;
 - при необходимости создает отдельный `venv`.
+
+`python_project_packages`
+- роль для установки дополнительных Python библиотек проекта;
+- использует Python, выбранный общей Python strategy проекта;
+- создает отдельный project venv;
+- устанавливает дополнительные пакеты через pip;
+- список пакетов задается переменной `llm_python_extra_packages`.
 
 `ollama_container`
 - создает каталоги и Docker network;
@@ -591,6 +601,8 @@ ls -ld /opt/llm/shared
     - `Grafana` отвечает на `3000`;
         
     - `garak` запускается из `/opt/llm/garak/venv`;
+    
+    - Ollama Web UI открывается на `http://<host>:8000`;
         
     - LangChain imports проходят из `/opt/venvs/langchain311`;
         
@@ -843,6 +855,80 @@ docker exec ollama ollama pull smollm:135m
         
     - при включенном GPU в compose добавляется reservation device с `driver: nvidia`, `count: all`, `capabilities: [gpu]`.
  
+---
+# Ollama Web UI
+
+В проекте дополнительно разворачивается веб-интерфейс для Ollama на базе проекта `ollama-webui`.
+
+Он позволяет:
+
+- работать с моделями Ollama через браузер;
+- отправлять запросы к моделям;
+- просматривать историю диалогов;
+- управлять доступом пользователей.
+
+Web UI разворачивается отдельной ролью: `ollama_webui`
+
+Контейнер Web UI подключается к той же Docker network, что и контейнер Ollama (`llm_stack_net`), и взаимодействует с ним через внутренний API.
+
+Основные параметры Web UI:
+
+- контейнер: `ollama-webui`
+- образ: `ghcr.io/ollama-webui/ollama-webui:main`
+- порт: `8000`
+- Docker network: `llm_stack_net`
+
+Основные пути:
+- Main dir: `/opt/llm/ollama-webui`
+- Compose dir: `/opt/llm/ollama-webui/compose`
+- Data dir: `/opt/llm/ollama-webui/data`
+
+Данные Web UI (пользователи, настройки, история) сохраняются в каталоге:
+- `/opt/llm/ollama-webui/data`
+
+## Доступ к Web UI
+
+После развёртывания интерфейс доступен по адресу:
+```bash
+http://<host>:8000
+```
+Например:
+```bash
+http://10.8.1.1:8000
+```
+
+## Первый вход
+
+При первом запуске Web UI не имеет заранее созданных учетных записей.
+
+Первый зарегистрированный пользователь автоматически получает роль администратора.
+
+Для начала работы необходимо:
+
+1. открыть страницу Web UI;
+2. нажать **Sign up**;
+3. создать первый аккаунт администратора.
+
+После этого можно добавлять других пользователей.
+
+## Проверка Web UI
+
+Проверить контейнер:
+```bash
+docker ps
+```
+
+Проверить HTTP доступность:
+```bash
+curl -I http://127.0.0.1:8000
+```
+
+или
+
+```bash
+curl -I http://10.8.1.1:8000
+```
+
 ---
 
 # Garak
@@ -1262,6 +1348,96 @@ group_vars/
 * Ниже приведены проблемы, которые чаще всего могут возникнуть при развёртывании или использовании проекта.
 
 ---
+## Ollama Web UI не открывается
+
+**Симптомы**
+
+```bash
+curl -I http://127.0.0.1:8000 => Возвращает ошибку или таймаут.
+```
+
+или
+
+```bash
+curl -I http://10.8.1.1:8000 => Возвращает ошибку или таймаут.
+```
+
+**Что проверить**
+Проверить, что контейнер ollama-webui запущен и что порт 8000 не занят другим сервисом.
+
+```bash
+docker ps
+docker logs ollama-webui
+ss -tulpn | grep 8000
+```
+
+## Ollama Web UI открывается, но не работает с моделями
+
+**Симптомы**
+
+Web UI открывается, но список моделей пустой или запросы к модели завершаются ошибкой.
+
+**Что проверить**
+
+- контейнер `ollama` запущен;
+- контейнер `ollama-webui` подключен к сети `llm_stack_net`;
+- `Ollama API` доступен:
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+```
+
+или
+
+```bash
+curl http://10.8.1.1:8000/api/tags
+```
+
+Проверить логи:
+```bash
+docker logs ollama
+docker logs ollama-webui
+```
+
+## В WSL2 команда nvidia-smi не находится
+
+**Симптомы**
+
+```bash
+nvidia-smi => Возвращает ошибку command not found
+```
+
+**Причина:**
+В WSL2 бинарник NVIDIA может находиться по пути:
+```bash
+/usr/lib/wsl/lib/nvidia-smi
+```
+
+**Решение:**
+Запустить роль GPU-подготовки проекта и проверить, что создан symlink:
+```bash
+ls -l /usr/bin/nvidia-smi
+nvidia-smi
+```
+
+## Дополнительные Python пакеты проекта не установились
+
+**Симптомы**
+
+Пакеты из `llm_python_extra_packages` отсутствуют в project venv.
+
+**Что проверить**
+
+- выбранный Python существует;
+- project venv создан;
+- список пакетов задан в `group_vars/all.yml`.
+
+Проверка:
+
+```bash
+/opt/venvs/project311/bin/python --version
+/opt/venvs/project311/bin/pip list
+```
 
 ## Ansible не может подключиться к хосту
 
@@ -1546,5 +1722,6 @@ llm_python_mode: custom
 
 расширить runtime окружение для **LangChain приложений**.
 
+реализовать HTTPS + Nginx.
 
 
