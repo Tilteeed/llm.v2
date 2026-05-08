@@ -271,7 +271,22 @@ langchain_runtime_packages:
   - langchain
   - langchain-community
   - langgraph
-langchain_runtime_extra_packages: []
+langchain_runtime_extra_packages:
+  - datasets
+  - fastapi
+  - langchain_chroma
+  - langchain_core
+  - langchain_huggingface
+  - langchain_text_splitters
+  - pydantic
+  - Requests
+  - uvicorn
+  - pysqlite3-binary
+  - jq
+  - sentence-transformers
+  - tourch
+  - safetensors
+  - langchain_community
 langchain_runtime_install_packages: true
 
 # ------------------------------

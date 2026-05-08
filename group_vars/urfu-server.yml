@@ -1,0 +1,32 @@
+---
+# URFU-specific GPU server profile.
+# Target example:
+# - Ubuntu 22.04.1 LTS
+# - NVIDIA driver already installed and working
+# - Docker is not installed initially
+# - NVIDIA Container Toolkit should be installed by Ansible
+
+llm_enable_gpu_stack: true
+
+# Docker should be installed and managed by this project.
+llm_manage_docker: true
+
+# Host NVIDIA driver already exists, do not touch it.
+llm_manage_nvidia_driver: false
+ubuntu_nvidia_manage_host_driver: false
+ubuntu_nvidia_smi_command: nvidia-smi
+
+# Docker GPU runtime should be installed/configured.
+llm_manage_nvidia_container_toolkit: true
+nvidia_container_toolkit_test_image: nvidia/cuda:12.4.1-base-ubuntu22.04
+
+# Ollama should use GPU.
+ollama_container_use_gpu: true
+
+# Monitoring on a normal Linux server, not WSL.
+monitoring_stack_enable_cadvisor: true
+monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro"
+
+monitoring_stack_grafana_default_dashboards:
+  - node-exporter-full.json
+  - docker-cadvisor.json
