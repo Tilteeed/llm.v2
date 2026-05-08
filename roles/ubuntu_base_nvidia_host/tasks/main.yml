@@ -64,7 +64,8 @@
       Strict NVIDIA PCI detection is skipped because
       ubuntu_nvidia_manage_host_driver=false.
       This is expected in WSL2, where GPU is not exposed like a standard PCI device.
-  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  when: ubuntu_nvidia_wsl_mode | default(false) | bool
+  #when: not (ubuntu_nvidia_manage_host_driver | bool)
   tags:
     - nvidia
     - validation
@@ -79,7 +80,8 @@
   ansible.builtin.stat:
     path: /usr/lib/wsl/lib/nvidia-smi
   register: ubuntu_nvidia_wsl_smi_stat
-  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  when: ubuntu_nvidia_wsl_mode | default(false) | bool
+  #when: not (ubuntu_nvidia_manage_host_driver | bool)
   tags:
     - nvidia
     - validation
@@ -94,7 +96,8 @@
       Cannot create standard nvidia-smi command symlink.
     success_msg: >-
       WSL NVIDIA SMI binary exists. Proceeding with symlink creation.
-  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  when: ubuntu_nvidia_wsl_mode | default(false) | bool
+  #when: not (ubuntu_nvidia_manage_host_driver | bool)
   tags:
     - nvidia
     - validation
@@ -105,7 +108,8 @@
     dest: /usr/bin/nvidia-smi
     state: link
     force: true
-  when: not (ubuntu_nvidia_manage_host_driver | bool)
+  when: ubuntu_nvidia_wsl_mode | default(false) | bool
+  #when: not (ubuntu_nvidia_manage_host_driver | bool)
   tags:
     - nvidia
     - validation
@@ -154,8 +158,8 @@
     msg: >-
       Host NVIDIA driver installation is disabled by variable
       ubuntu_nvidia_manage_host_driver=false.
-      This is expected for WSL2, where GPU support is provided
-      by Windows/WSL instead of installing Linux host drivers inside Ubuntu.
+      Existing NVIDIA driver will be validated with {{ ubuntu_nvidia_smi_command }}.
+      WSL-specific symlink tasks are executed only when ubuntu_nvidia_wsl_mode=true.
   when: not (ubuntu_nvidia_manage_host_driver | bool)
   tags:
     - nvidia
@@ -219,17 +223,19 @@
 # В WSL mode она выполняется только если nvidia-smi уже доступен
 # до этого, потому что драйвер внутри Ubuntu не устанавливается.
 # ------------------------------------------------------------
-- name: Validate NVIDIA availability with nvidia-smi after installation/reboot or in WSL mode
+- name: Validate NVIDIA availability with nvidia-smi after installation/reboot or existing driver mode
   ansible.builtin.command:
     argv:
       - "{{ ubuntu_nvidia_smi_command }}"
   register: ubuntu_nvidia_smi_postcheck
   changed_when: false
-  failed_when: false
   retries: 10
   delay: 10
   until: ubuntu_nvidia_smi_postcheck.rc == 0
-  when: ubuntu_nvidia_manage_host_driver | bool or ubuntu_nvidia_smi_precheck.rc == 0
+  when:
+    - ubuntu_nvidia_manage_host_driver | bool
+      or ubuntu_nvidia_wsl_mode | default(false) | bool
+      or ubuntu_nvidia_validate_existing_driver | default(true) | bool
   tags:
     - nvidia
     - validation
@@ -275,12 +281,13 @@
 - name: Show final NVIDIA validation output
   ansible.builtin.debug:
     msg:
-      - "Host NVIDIA driver management mode: {{ 'standard Linux host' if (ubuntu_nvidia_manage_host_driver | bool) else 'WSL-compatible mode' }}"
+      - "Host NVIDIA driver management mode: {{ 'managed Linux driver install' if (ubuntu_nvidia_manage_host_driver | bool) else 'existing driver validation only' }}"
+      - "WSL mode: {{ ubuntu_nvidia_wsl_mode | default(false) | bool }}"
       - "nvidia-smi command used: {{ ubuntu_nvidia_smi_command }}"
       - "nvidia-smi precheck rc: {{ ubuntu_nvidia_smi_precheck.rc }}"
       - "nvidia-smi postcheck rc: {{ ubuntu_nvidia_smi_postcheck.rc if (ubuntu_nvidia_smi_postcheck is defined and ubuntu_nvidia_smi_postcheck.rc is defined) else 'not executed' }}"
-      - "PCI validation executed: {{ 'yes' if (ubuntu_nvidia_manage_host_driver | bool) else 'no, skipped for WSL mode' }}"
-      - "Procfs validation executed: {{ 'yes' if (ubuntu_nvidia_manage_host_driver | bool) else 'no, skipped for WSL mode' }}"
+      - "PCI validation executed: {{ 'yes' if (ubuntu_nvidia_manage_host_driver | bool) else 'no, skipped because driver installation is not managed by this role' }}"
+      - "Procfs validation executed: {{ 'yes' if (ubuntu_nvidia_manage_host_driver | bool) else 'no, skipped because driver installation is not managed by this role' }}"
       - "Host is ready for the next role: Docker installation."
   tags:
     - nvidia

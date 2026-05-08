@@ -30,3 +30,5 @@ monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro"
 monitoring_stack_grafana_default_dashboards:
   - node-exporter-full.json
   - docker-cadvisor.json
+ubuntu_nvidia_wsl_mode: false
+ubuntu_nvidia_validate_existing_driver: true
