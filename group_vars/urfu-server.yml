@@ -32,7 +32,16 @@ monitoring_stack_grafana_default_dashboards:
   - docker-cadvisor.json
 ubuntu_nvidia_wsl_mode: false
 ubuntu_nvidia_validate_existing_driver: true
-# Store heavy LLM data on large secondary disk.
+# URFU server has a large secondary disk mounted at /mnt/sdd.
+urfu_server_large_disk: /mnt/sdd
+urfu_server_ansible_tmp_dir: /mnt/sdd/.ansible-malkerov/tmp
+
+# Use large disk for Ansible temporary files only for this profile.
+ansible_remote_tmp: /mnt/sdd/.ansible-malkerov/tmp
+
+# Store heavy Docker/Ollama data on the large disk.
+docker_engine_data_root: /mnt/sdd/docker
+
 ollama_container_base_dir: /mnt/sdd/llm/ollama
 ollama_container_compose_dir: /mnt/sdd/llm/ollama/compose
 ollama_container_data_dir: /mnt/sdd/llm/ollama/data
