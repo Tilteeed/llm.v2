@@ -24,6 +24,21 @@
         chmod 755 /mnt/sdd/llm/ollama/compose
         chmod 755 /mnt/sdd/llm/ollama/data
 
+    - name: Check URFU server disk space before setup
+      ansible.builtin.raw: |
+        root_avail_mb=$(df -Pm / | awk 'NR==2 {print $4}')
+        sdd_avail_mb=$(df -Pm /mnt/sdd | awk 'NR==2 {print $4}')
+
+        if [ "$root_avail_mb" -lt 2048 ]; then
+          echo "ERROR: root filesystem / has less than 2GB free: ${root_avail_mb}MB"
+          exit 1
+        fi
+
+        if [ "$sdd_avail_mb" -lt 102400 ]; then
+          echo "ERROR: /mnt/sdd has less than 100GB free: ${sdd_avail_mb}MB"
+          exit 1
+        fi
+
 - name: Prepare Ubuntu host for LLM workloads
   hosts: llm_nodes
   become: true

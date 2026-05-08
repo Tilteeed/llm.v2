@@ -284,7 +284,7 @@ langchain_runtime_extra_packages:
   - pysqlite3-binary
   - jq
   - sentence-transformers
-  - tourch
+  - torch
   - safetensors
   - langchain_community
 langchain_runtime_install_packages: true

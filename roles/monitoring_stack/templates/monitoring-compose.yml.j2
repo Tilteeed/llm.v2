@@ -39,12 +39,11 @@ services:
     command:
       - "--path.rootfs=/host"
     volumes:
-      #- "/:/host:ro,rslave"
       - "{{ monitoring_stack_node_exporter_rootfs_mount }}"
     networks:
       - {{ monitoring_stack_network_name }}
 
-  {% if monitoring_stack_enable_cadvisor %}
+{% if monitoring_stack_enable_cadvisor | bool %}
   cadvisor:
     image: {{ monitoring_stack_cadvisor_image }}
     container_name: {{ monitoring_stack_cadvisor_container_name }}
