@@ -32,3 +32,7 @@ monitoring_stack_grafana_default_dashboards:
   - docker-cadvisor.json
 ubuntu_nvidia_wsl_mode: false
 ubuntu_nvidia_validate_existing_driver: true
+# Store heavy LLM data on large secondary disk.
+ollama_container_base_dir: /mnt/sdd/llm/ollama
+ollama_container_compose_dir: /mnt/sdd/llm/ollama/compose
+ollama_container_data_dir: /mnt/sdd/llm/ollama/data
