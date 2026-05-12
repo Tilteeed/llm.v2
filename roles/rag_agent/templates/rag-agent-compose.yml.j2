@@ -1,0 +1,37 @@
+services:
+  {{ rag_agent_container_name }}:
+    image: {{ rag_agent_image_tag }}
+    container_name: {{ rag_agent_container_name }}
+    restart: {{ rag_agent_restart_policy }}
+    ports:
+      - "{{ rag_agent_bind_address }}:{{ rag_agent_host_port }}:{{ rag_agent_internal_port }}"
+    environment:
+      # Эти env переопределяют значения из встроенного config.toml.
+      # См. src/rag_agent/core/config.py — ENV_TO_FIELD.
+      APP_PORT: "{{ rag_agent_internal_port }}"
+      APP_HOST: "0.0.0.0"
+      OLLAMA_BASE_URL: "{{ rag_agent_ollama_base_url }}"
+      OLLAMA_CHAT_MODEL: "{{ rag_agent_chat_model }}"
+      OLLAMA_EMBEDDING_MODEL: "{{ rag_agent_embedding_model }}"
+      OLLAMA_TIMEOUT: "{{ rag_agent_ollama_timeout }}"
+      MAX_CHUNK_SIZE: "{{ rag_agent_max_chunk_size }}"
+      CHUNK_OVERLAP: "{{ rag_agent_chunk_overlap }}"
+      DEFAULT_TOP_K: "{{ rag_agent_default_top_k }}"
+      MIN_RETRIEVAL_SCORE: "{{ rag_agent_min_retrieval_score }}"
+      MAX_UPLOAD_SIZE_BYTES: "{{ rag_agent_max_upload_size_bytes }}"
+      ALLOWED_DOCUMENT_EXTENSIONS: "{{ rag_agent_allowed_document_extensions }}"
+      UI_ENABLED: "{{ rag_agent_ui_enabled | string | lower }}"
+    volumes:
+      # Папка с индексом и загруженными документами — наружу,
+      # чтобы переживало рестарт контейнера.
+      - "{{ rag_agent_data_dir }}:/app/data"
+    # Подстраховка: внутри контейнера тоже знаем про хостовой IP,
+    # на случай если RAG обратится к 10.40.240.103 не через bridge.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - {{ rag_agent_network_name }}
+
+networks:
+  {{ rag_agent_network_name }}:
+    external: true

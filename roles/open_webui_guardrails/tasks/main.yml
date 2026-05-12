@@ -1,0 +1,263 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: open_webui_guardrails
+# ============================================================
+
+- name: Validate Docker CLI before Open WebUI deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: open_webui_docker_version_check
+  changed_when: false
+  tags:
+    - open_webui
+    - validation
+    - prereq
+
+- name: Validate Docker daemon before Open WebUI deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  register: open_webui_docker_info_check
+  changed_when: false
+  tags:
+    - open_webui
+    - validation
+    - prereq
+
+- name: Ensure git is installed (required to clone WebUI repo)
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: false
+  tags:
+    - open_webui
+    - prereq
+
+- name: Ensure Open WebUI base directory exists
+  ansible.builtin.file:
+    path: "{{ open_webui_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - open_webui
+    - filesystem
+
+- name: Ensure Open WebUI compose directory exists
+  ansible.builtin.file:
+    path: "{{ open_webui_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - open_webui
+    - filesystem
+
+- name: Ensure Open WebUI data directory exists
+  ansible.builtin.file:
+    path: "{{ open_webui_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - open_webui
+    - filesystem
+    - data
+
+- name: Clone newWebLLM repository (Open WebUI fork with Guardrails)
+  ansible.builtin.git:
+    repo: "{{ open_webui_repo_url }}"
+    dest: "{{ open_webui_src_dir }}"
+    version: "{{ open_webui_repo_version }}"
+    update: true
+    force: true
+  register: open_webui_repo_clone
+  # Репо большое (форк open-webui, 16k+ коммитов).
+  # Первый клон длится несколько минут — это нормально.
+  tags:
+    - open_webui
+    - source
+
+- name: Check that Dockerfile.guardrails exists in cloned repo
+  ansible.builtin.stat:
+    path: "{{ open_webui_src_dir }}/{{ open_webui_dockerfile }}"
+  register: open_webui_dockerfile_stat
+  tags:
+    - open_webui
+    - validation
+
+- name: Fail if Dockerfile.guardrails is missing
+  ansible.builtin.assert:
+    that:
+      - open_webui_dockerfile_stat.stat.exists
+      - open_webui_dockerfile_stat.stat.isreg
+    fail_msg: >-
+      Dockerfile.guardrails not found at
+      {{ open_webui_src_dir }}/{{ open_webui_dockerfile }}.
+      Check open_webui_repo_url / open_webui_repo_version.
+    success_msg: >-
+      Dockerfile.guardrails is present.
+  tags:
+    - open_webui
+    - validation
+
+- name: Check whether shared Docker network exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ open_webui_network_name }}"
+  register: open_webui_network_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - open_webui
+    - network
+
+- name: Fail if shared Docker network is missing
+  ansible.builtin.assert:
+    that:
+      - open_webui_network_check.rc == 0
+    fail_msg: >-
+      Required Docker network {{ open_webui_network_name }} was not found.
+      Deploy ollama_container first or ensure the shared network exists.
+    success_msg: >-
+      Docker network {{ open_webui_network_name }} exists.
+  tags:
+    - open_webui
+    - network
+    - validation
+
+- name: Render Open WebUI docker compose file
+  ansible.builtin.template:
+    src: open-webui-guardrails-compose.yml.j2
+    dest: "{{ open_webui_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: open_webui_restart_stack
+  tags:
+    - open_webui
+    - compose
+
+# ------------------------------------------------------------
+# Сборка образа. Dockerfile.guardrails — лёгкий: тянет готовый
+# образ open-webui:main с GHCR + доустанавливает nemoguardrails.
+# Базовый pull может занять ощутимое время на медленной сети,
+# поэтому async/poll.
+# ------------------------------------------------------------
+- name: Build Open WebUI (Guardrails) Docker image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - -t
+      - "{{ open_webui_image_tag }}"
+      - -f
+      - "{{ open_webui_src_dir }}/{{ open_webui_dockerfile }}"
+      - "{{ open_webui_src_dir }}"
+  register: open_webui_build
+  changed_when: >-
+    'Successfully tagged' in open_webui_build.stdout
+    or 'naming to docker.io/library/' in open_webui_build.stderr
+    or 'writing image' in open_webui_build.stderr
+  async: 1800
+  poll: 10
+  tags:
+    - open_webui
+    - deploy
+    - image
+
+- name: Show Open WebUI build result
+  ansible.builtin.debug:
+    var: open_webui_build.stdout_lines
+  tags:
+    - open_webui
+    - deploy
+    - image
+
+- name: Start Open WebUI compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ open_webui_compose_file }}"
+      - up
+      - -d
+  register: open_webui_compose_up
+  changed_when: >-
+    'Started' in open_webui_compose_up.stdout
+    or 'Creating' in open_webui_compose_up.stdout
+    or 'Recreating' in open_webui_compose_up.stdout
+  tags:
+    - open_webui
+    - compose
+    - deploy
+
+- name: Flush handlers to restart Open WebUI stack immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - open_webui
+    - compose
+    - deploy
+
+- name: Inspect Open WebUI container running state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{{ '{{.State.Running}}' }}"
+      - "{{ open_webui_container_name }}"
+  register: open_webui_running_state
+  changed_when: false
+  retries: 10
+  delay: 5
+  until: open_webui_running_state.stdout == "true"
+  tags:
+    - open_webui
+    - validation
+    - deploy
+
+- name: Wait until Open WebUI HTTP endpoint becomes available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ open_webui_host_port }}/"
+    method: GET
+    return_content: false
+    # Первый старт делает миграции БД, может ответить 302/401 (redirect на логин) — это «жив».
+    status_code: [200, 302, 401]
+    timeout: 10
+  register: open_webui_http_check
+  retries: "{{ open_webui_healthcheck_retries }}"
+  delay: "{{ open_webui_healthcheck_delay }}"
+  until: open_webui_http_check.status in [200, 302, 401]
+  changed_when: false
+  tags:
+    - open_webui
+    - validation
+    - healthcheck
+
+- name: Show final Open WebUI deployment validation output
+  ansible.builtin.debug:
+    msg:
+      - "Open WebUI (Guardrails) deployment completed successfully."
+      - "Container name: {{ open_webui_container_name }}"
+      - "Image: {{ open_webui_image_tag }}"
+      - "Published endpoint: http://{{ open_webui_bind_address }}:{{ open_webui_host_port }}/"
+      - "Ollama backend (env OLLAMA_BASE_URL):           {{ open_webui_ollama_base_url }}"
+      - "Ollama backend (env NEMO_GUARDRAILS_OLLAMA_URL): {{ open_webui_nemo_guardrails_ollama_url }}"
+      - "Data directory on host: {{ open_webui_data_dir }}"
+      - ""
+      - "Первый зарегистрировавшийся пользователь автоматически становится админом."
+  tags:
+    - open_webui
+    - validation

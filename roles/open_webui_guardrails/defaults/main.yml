@@ -1,0 +1,59 @@
+---
+# ============================================================
+# defaults/main.yml
+# Роль: open_webui_guardrails
+#
+# Что делает роль:
+# 1. Клонирует репозиторий phenkka/newWebLLM в локальный каталог.
+# 2. Собирает Docker-образ через Dockerfile.guardrails
+#    (берёт готовый ghcr.io/open-webui/open-webui:main, доустанавливает
+#    nemoguardrails и копирует pacthed backend-файлы).
+# 3. Шаблонит docker-compose, проставляет OLLAMA_BASE_URL и
+#    NEMO_GUARDRAILS_OLLAMA_URL.
+# 4. Поднимает контейнер.
+# 5. Проверяет HTTP-ответ.
+#
+# Заменяет собой роль ollama_webui. После применения роль
+# ollama_webui удаляется из проекта.
+# ============================================================
+
+open_webui_enable: true
+
+# --- Git -----------------------------------------------------
+open_webui_repo_url: "https://github.com/phenkka/newWebLLM.git"
+open_webui_repo_version: "main"
+
+# --- Пути на хосте -------------------------------------------
+open_webui_base_dir: /opt/llm/open-webui
+open_webui_src_dir: "{{ open_webui_base_dir }}/src"
+open_webui_compose_dir: "{{ open_webui_base_dir }}/compose"
+open_webui_data_dir: "{{ open_webui_base_dir }}/data"
+open_webui_compose_file: "{{ open_webui_compose_dir }}/compose.yml"
+
+# --- Контейнер -----------------------------------------------
+open_webui_container_name: open-webui
+open_webui_image_tag: "open-webui-guardrails:local"
+open_webui_dockerfile: "Dockerfile.guardrails"
+open_webui_network_name: "{{ ollama_container_network_name }}"
+open_webui_restart_policy: unless-stopped
+open_webui_bind_address: 0.0.0.0
+# Хост-порт: 3000 у вас занят Grafana, 8000 — теперь RAG.
+# Поэтому WebUI наружу выводим на 3030.
+open_webui_host_port: 3030
+open_webui_internal_port: 8080
+
+# --- Подключение к Ollama ------------------------------------
+# По требованию используется реальный хостовой IP, а не имя
+# контейнера в docker network. Меняется одной переменной
+# llm_external_host в urfu-server.yml.
+#open_webui_ollama_base_url: "http://{{ llm_external_host }}:{{ ollama_container_host_port }}"
+#open_webui_nemo_guardrails_ollama_url: "http://{{ llm_external_host }}:{{ ollama_container_host_port }}"
+
+open_webui_ollama_base_url: "http://{{ ollama_container_name }}:{{ ollama_container_internal_port }}"
+open_webui_nemo_guardrails_ollama_url: "http://{{ ollama_container_name }}:{{ ollama_container_internal_port }}"
+# Секрет сессии. ОБЯЗАТЕЛЬНО вынеси в ansible-vault.
+open_webui_secret_key: "aadd6d6bbc33128f678472a10a76c1dae5dd52825e6835a10b5df426d930ba93"
+
+# --- Healthcheck --------------------------------------------
+open_webui_healthcheck_retries: 60
+open_webui_healthcheck_delay: 10

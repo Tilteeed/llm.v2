@@ -1,0 +1,23 @@
+services:
+  {{ open_webui_container_name }}:
+    image: {{ open_webui_image_tag }}
+    container_name: {{ open_webui_container_name }}
+    restart: {{ open_webui_restart_policy }}
+    ports:
+      - "{{ open_webui_bind_address }}:{{ open_webui_host_port }}:{{ open_webui_internal_port }}"
+    environment:
+      OLLAMA_BASE_URL: "{{ open_webui_ollama_base_url }}"
+      NEMO_GUARDRAILS_OLLAMA_URL: "{{ open_webui_nemo_guardrails_ollama_url }}"
+      WEBUI_SECRET_KEY: "{{ open_webui_secret_key }}"
+    volumes:
+      # Volume на хосте, не named-volume — данные лежат рядом
+      # с остальной инфраструктурой (на urfu-server в /mnt/sdd).
+      - "{{ open_webui_data_dir }}:/app/backend/data"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - {{ open_webui_network_name }}
+
+networks:
+  {{ open_webui_network_name }}:
+    external: true

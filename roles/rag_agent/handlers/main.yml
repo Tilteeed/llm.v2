@@ -1,0 +1,11 @@
+---
+- name: rag_agent_restart_stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ rag_agent_compose_file }}"
+      - up
+      - -d
+      - --force-recreate

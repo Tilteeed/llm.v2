@@ -1,0 +1,79 @@
+---
+# ============================================================
+# defaults/main.yml
+# Роль: rag_agent
+#
+# Что делает роль:
+# 1. Клонирует репозиторий g1nry/rag_agent в локальный каталог.
+# 2. Собирает Docker-образ из этого репозитория.
+# 3. Шаблонит docker-compose-файл, где все настройки RAG
+#    (адрес Ollama, имена моделей, и т.д.) подаются через
+#    environment variables — config.toml встроен в образ
+#    и пере-определяется этими env-vars (см. core/config.py
+#    в репозитории RAG).
+# 4. Поднимает контейнер.
+# 5. Проверяет /health endpoint.
+#
+# Сервис попадает в ту же Docker network, что и Ollama
+# (llm_stack_net), чтобы при желании можно было обращаться
+# к Ollama по DNS-имени "ollama" вместо хостового IP.
+# По умолчанию используется хостовой IP (llm_external_host).
+# ============================================================
+
+# --- Включение/выключение роли -------------------------------
+rag_agent_enable: true
+
+# --- Git -----------------------------------------------------
+rag_agent_repo_url: "https://github.com/g1nry/rag_agent.git"
+rag_agent_repo_version: "main"
+
+# --- Пути на хосте -------------------------------------------
+# По дефолту /opt/llm/rag-agent, в urfu-server.yml будет
+# переопределено на /mnt/sdd/llm/rag-agent.
+rag_agent_base_dir: /opt/llm/rag-agent
+rag_agent_src_dir: "{{ rag_agent_base_dir }}/src"
+rag_agent_compose_dir: "{{ rag_agent_base_dir }}/compose"
+rag_agent_data_dir: "{{ rag_agent_base_dir }}/data"
+rag_agent_compose_file: "{{ rag_agent_compose_dir }}/compose.yml"
+
+# --- Контейнер -----------------------------------------------
+rag_agent_container_name: rag-agent
+rag_agent_image_tag: "rag-agent:local"
+rag_agent_network_name: "{{ ollama_container_network_name }}"
+rag_agent_restart_policy: unless-stopped
+rag_agent_bind_address: 0.0.0.0
+rag_agent_host_port: 8000
+rag_agent_internal_port: 8000
+
+# --- Подключение к Ollama ------------------------------------
+# Конкретный IP сервера, чтобы наружу выглядело единообразно
+# (Nemo Guardrails в WebUI ожидает реальный URL; здесь —
+# тот же URL для консистентности). Переопределяется в
+# urfu-server.yml через llm_external_host.
+#rag_agent_ollama_base_url: "http://{{ llm_external_host }}:{{ ollama_container_host_port }}"
+
+# Альтернатива (если хочется идти через docker DNS внутри сети,
+# минуя хост): закомментируй строку выше и раскомментируй ниже.
+rag_agent_ollama_base_url: "http://{{ ollama_container_name }}:{{ ollama_container_internal_port }}"
+
+# --- Модели RAG ----------------------------------------------
+# Эти же модели ОБЯЗАНЫ быть в ollama_pull_models_list — иначе
+# /api/v1/chat будет возвращать 404 от Ollama.
+rag_agent_chat_model: "llama3.2:1b"
+rag_agent_embedding_model: "nomic-embed-text"
+rag_agent_ollama_timeout: "60.0"
+
+# --- Поведение RAG ------------------------------------------
+rag_agent_max_chunk_size: 800
+rag_agent_chunk_overlap: 120
+rag_agent_default_top_k: 4
+rag_agent_min_retrieval_score: 0.2
+rag_agent_max_upload_size_bytes: 1048576
+rag_agent_allowed_document_extensions: ".txt,.md"
+# Встроенный UI оставлен только под локальные smoke-проверки.
+# Основной UI пользователя — Open WebUI.
+rag_agent_ui_enabled: true
+
+# --- Healthcheck --------------------------------------------
+rag_agent_healthcheck_retries: 30
+rag_agent_healthcheck_delay: 5

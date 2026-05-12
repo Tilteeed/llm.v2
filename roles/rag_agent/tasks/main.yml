@@ -1,0 +1,242 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: rag_agent
+# ============================================================
+
+- name: Validate Docker CLI before RAG agent deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: rag_agent_docker_version_check
+  changed_when: false
+  tags:
+    - rag_agent
+    - validation
+    - prereq
+
+- name: Validate Docker daemon before RAG agent deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  register: rag_agent_docker_info_check
+  changed_when: false
+  tags:
+    - rag_agent
+    - validation
+    - prereq
+
+- name: Ensure git is installed (required to clone RAG repo)
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: false
+  tags:
+    - rag_agent
+    - prereq
+
+- name: Ensure RAG agent base directory exists
+  ansible.builtin.file:
+    path: "{{ rag_agent_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - rag_agent
+    - filesystem
+
+- name: Ensure RAG agent compose directory exists
+  ansible.builtin.file:
+    path: "{{ rag_agent_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - rag_agent
+    - filesystem
+
+- name: Ensure RAG agent data directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ rag_agent_data_dir }}"
+    - "{{ rag_agent_data_dir }}/documents"
+    - "{{ rag_agent_data_dir }}/indexes"
+  tags:
+    - rag_agent
+    - filesystem
+    - data
+
+- name: Clone RAG agent repository
+  ansible.builtin.git:
+    repo: "{{ rag_agent_repo_url }}"
+    dest: "{{ rag_agent_src_dir }}"
+    version: "{{ rag_agent_repo_version }}"
+    update: true
+    force: true
+  register: rag_agent_repo_clone
+  tags:
+    - rag_agent
+    - source
+
+- name: Check whether shared Docker network exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ rag_agent_network_name }}"
+  register: rag_agent_network_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - rag_agent
+    - network
+
+- name: Fail if shared Docker network is missing
+  ansible.builtin.assert:
+    that:
+      - rag_agent_network_check.rc == 0
+    fail_msg: >-
+      Required Docker network {{ rag_agent_network_name }} was not found.
+      Deploy ollama_container first or ensure the shared network exists.
+    success_msg: >-
+      Docker network {{ rag_agent_network_name }} exists.
+  tags:
+    - rag_agent
+    - network
+    - validation
+
+- name: Render RAG agent docker compose file
+  ansible.builtin.template:
+    src: rag-agent-compose.yml.j2
+    dest: "{{ rag_agent_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: rag_agent_restart_stack
+  tags:
+    - rag_agent
+    - compose
+
+# ------------------------------------------------------------
+# Сборка образа. Делаем async/poll по тому же принципу, что
+# и docker pull в ollama_container — на медленной сети это
+# может занять несколько минут.
+# ------------------------------------------------------------
+- name: Build RAG agent Docker image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - -t
+      - "{{ rag_agent_image_tag }}"
+      - "{{ rag_agent_src_dir }}"
+  register: rag_agent_build
+  changed_when: >-
+    'Successfully tagged' in rag_agent_build.stdout
+    or 'naming to docker.io/library/' in rag_agent_build.stderr
+    or 'writing image' in rag_agent_build.stderr
+  async: 1800
+  poll: 10
+  tags:
+    - rag_agent
+    - deploy
+    - image
+
+- name: Show RAG agent image build result
+  ansible.builtin.debug:
+    var: rag_agent_build.stdout_lines
+  tags:
+    - rag_agent
+    - deploy
+    - image
+
+- name: Start RAG agent compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ rag_agent_compose_file }}"
+      - up
+      - -d
+  register: rag_agent_compose_up
+  changed_when: >-
+    'Started' in rag_agent_compose_up.stdout
+    or 'Creating' in rag_agent_compose_up.stdout
+    or 'Recreating' in rag_agent_compose_up.stdout
+  tags:
+    - rag_agent
+    - compose
+    - deploy
+
+- name: Flush handlers to restart RAG stack immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - rag_agent
+    - compose
+    - deploy
+
+- name: Inspect RAG agent container running state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{{ '{{.State.Running}}' }}"
+      - "{{ rag_agent_container_name }}"
+  register: rag_agent_running_state
+  changed_when: false
+  retries: 10
+  delay: 5
+  until: rag_agent_running_state.stdout == "true"
+  tags:
+    - rag_agent
+    - validation
+    - deploy
+
+- name: Wait until RAG agent /health responds
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ rag_agent_host_port }}/health"
+    method: GET
+    return_content: false
+    status_code: 200
+    timeout: 10
+  register: rag_agent_health_check
+  retries: "{{ rag_agent_healthcheck_retries }}"
+  delay: "{{ rag_agent_healthcheck_delay }}"
+  until: rag_agent_health_check.status == 200
+  changed_when: false
+  tags:
+    - rag_agent
+    - validation
+    - healthcheck
+
+- name: Show final RAG agent deployment validation output
+  ansible.builtin.debug:
+    msg:
+      - "RAG agent deployment completed successfully."
+      - "Container name: {{ rag_agent_container_name }}"
+      - "Image: {{ rag_agent_image_tag }}"
+      - "Published endpoint: http://{{ rag_agent_bind_address }}:{{ rag_agent_host_port }}"
+      - "Health URL: http://127.0.0.1:{{ rag_agent_host_port }}/health"
+      - "Ollama backend: {{ rag_agent_ollama_base_url }}"
+      - "Chat model: {{ rag_agent_chat_model }}"
+      - "Embedding model: {{ rag_agent_embedding_model }}"
+      - "Data directory on host: {{ rag_agent_data_dir }}"
+      - ""
+      - "Поменять модель: правь rag_agent_chat_model / rag_agent_embedding_model"
+      - "в group_vars/all.yml (или urfu-server.yml) и прогоняй:"
+      - "  ansible-playbook site.yml --tags rag_agent,ollama_pull_models"
+  tags:
+    - rag_agent
+    - validation

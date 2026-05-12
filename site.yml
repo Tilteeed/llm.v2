@@ -130,18 +130,30 @@
         - ollama_container
         - ollama
 
-    - role: ollama_webui
-      when: ollama_webui_enable | bool
-      tags:
-        - ollama_webui
-        - webui
-        - ui
-
     - role: ollama_pull_models
       tags:
         - ollama_pull_models
         - ollama_models
         - pull_models
+
+    # === НОВОЕ: RAG agent backend (зависит от Ollama + моделей) ===
+    - role: rag_agent
+      when: rag_agent_enable | bool
+      tags:
+        - rag_agent
+        - rag
+
+
+
+    # === НОВОЕ: Open WebUI с защитой Nemo Guardrails ===
+    # Заменяет старую роль ollama_webui (удалена из проекта).
+    - role: open_webui_guardrails
+      when: open_webui_enable | bool
+      tags:
+        - open_webui_guardrails
+        - open_webui
+        - webui
+        - ui
 
     - role: monitoring_stack
       tags:

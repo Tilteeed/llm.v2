@@ -245,7 +245,42 @@ python_project_packages_venv_owner: root
 python_project_packages_venv_group: root
 python_project_packages_upgrade_pip_stack: true
 
-llm_python_extra_packages: []
+llm_python_extra_packages:
+  # --- агент (FastAPI + утилиты) ---
+  - "fastapi>=0.115.0,<1.0.0"
+  - "httpx>=0.27.0,<1.0.0"
+  - "pydantic>=2.7.0,<3.0.0"
+  - "python-multipart>=0.0.9,<1.0.0"
+  - "uvicorn[standard]>=0.30.0,<1.0.0"
+  - "pytest>=8.2.0,<9.0.0"
+  - "setuptools>=68"
+  - "wheel"
+  # --- build tools (нужны до тяжёлых ML-пакетов) ---
+  - "packaging"
+  - "ninja"
+  # --- ML / обучение ---
+  - "torch"
+  - "torchvision"
+  - "torchaudio"
+  - "axolotl[deepspeed]"
+  - "transformers"
+  - "datasets"
+  - "accelerate"
+  - "peft"
+  - "bitsandbytes"
+  - "trl"
+  - "sentencepiece"
+  - "protobuf"
+  - "safetensors"
+  - "huggingface_hub"
+  - "wandb"
+  - "tensorboard"
+  - "deepspeed"
+  - "xformers"
+# Заметки:
+#   - На cpu_only-хосте bitsandbytes/xformers/deepspeed либо встанут в CPU-режиме,
+#     либо могут не подняться без CUDA — это ожидаемо.
+#   - Для CUDA-сборки torch потребуется отдельный --index-url.
 # Пример:
 # llm_python_extra_packages:
 #   - transformers
@@ -352,25 +387,18 @@ llm_system_python_binary: /usr/bin/python3
 llm_custom_python_binary: /opt/python311/bin/python3.11
 
 # ------------------------------
-# ollama_webui
+# rag_agent
 # ------------------------------
-ollama_webui_enable: true
+# Дефолтные значения роли rag_agent уже описаны в roles/rag_agent/defaults/main.yml.
+# Здесь оставляем только то, что часто меняют между сценариями.
+# Конкретные модели для RAG задаются в сценарных файлах (urfu-server.yml),
+# чтобы CPU-only хост не пытался тянуть llama3.2:1b.
+ 
+# Включить роль rag_agent на этом сценарии? (false для cpu_only при желании)
+rag_agent_enable: true
 
-ollama_webui_container_name: ollama-webui
-ollama_webui_image: ghcr.io/ollama-webui/ollama-webui:main
-
-ollama_webui_base_dir: /opt/llm/ollama-webui
-ollama_webui_compose_dir: "{{ ollama_webui_base_dir }}/compose"
-ollama_webui_data_dir: "{{ ollama_webui_base_dir }}/data"
-ollama_webui_compose_file: "{{ ollama_webui_compose_dir }}/compose.yml"
-
-ollama_webui_host_port: 8000
-ollama_webui_internal_port: 8080
-ollama_webui_bind_address: 0.0.0.0
-ollama_webui_restart_policy: unless-stopped
-
-ollama_webui_network_name: "{{ ollama_container_network_name }}"
-ollama_webui_ollama_api_base_url: "http://{{ ollama_container_name }}:{{ ollama_container_internal_port }}/api"
-
-ollama_webui_healthcheck_retries: 30
-ollama_webui_healthcheck_delay: 10
+# ------------------------------
+# open_webui (Open WebUI с Nemo Guardrails)
+# ------------------------------
+# Дефолты в roles/open_webui_guardrails/defaults/main.yml. Здесь — только toggle.
+open_webui_enable: true

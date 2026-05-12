@@ -45,3 +45,40 @@ docker_engine_data_root: /mnt/sdd/docker
 ollama_container_base_dir: /mnt/sdd/llm/ollama
 ollama_container_compose_dir: /mnt/sdd/llm/ollama/compose
 ollama_container_data_dir: /mnt/sdd/llm/ollama/data
+
+# ------------------------------
+# rag_agent: пути на большом диске
+# ------------------------------
+rag_agent_base_dir: /mnt/sdd/llm/rag-agent
+rag_agent_src_dir: /mnt/sdd/llm/rag-agent/src
+rag_agent_compose_dir: /mnt/sdd/llm/rag-agent/compose
+rag_agent_data_dir: /mnt/sdd/llm/rag-agent/data
+rag_agent_compose_file: /mnt/sdd/llm/rag-agent/compose/compose.yml
+ 
+# Модели для RAG. Эти же модели прокидываем в ollama_pull_models_list ниже.
+rag_agent_chat_model: "llama3.2:1b"
+rag_agent_embedding_model: "nomic-embed-text"
+ 
+# ------------------------------
+# open_webui: пути на большом диске + секрет
+# ------------------------------
+open_webui_base_dir: /mnt/sdd/llm/open-webui
+open_webui_src_dir: /mnt/sdd/llm/open-webui/src
+open_webui_compose_dir: /mnt/sdd/llm/open-webui/compose
+open_webui_data_dir: /mnt/sdd/llm/open-webui/data
+open_webui_compose_file: /mnt/sdd/llm/open-webui/compose/compose.yml
+ 
+# ВАЖНО:вынеси в Vault.
+open_webui_secret_key: "aadd6d6bbc33128f678472a10a76c1dae5dd52825e6835a10b5df426d930ba93"
+ 
+# ------------------------------
+# Модели в Ollama — должны включать модели для RAG
+# ------------------------------
+# Переопределяем дефолтный список из all.yml. Подтянутся при
+# ansible-playbook site.yml --tags ollama_pull_models
+ollama_pull_models_list:
+  - smollm:135m
+  - "{{ rag_agent_chat_model }}"        # llama3.2:1b (для чата в RAG)
+  - "{{ rag_agent_embedding_model }}"   # nomic-embed-text (для embeddings)
+  # При необходимости добавь сюда модели для garak:
+  # - qwen2.5:7b
