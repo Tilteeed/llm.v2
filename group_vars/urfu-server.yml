@@ -30,55 +30,31 @@ monitoring_stack_node_exporter_rootfs_mount: "/:/host:ro"
 monitoring_stack_grafana_default_dashboards:
   - node-exporter-full.json
   - docker-cadvisor.json
+
 ubuntu_nvidia_wsl_mode: false
 ubuntu_nvidia_validate_existing_driver: true
-# URFU server has a large secondary disk mounted at /mnt/sdd.
-urfu_server_large_disk: /mnt/sdd
-urfu_server_ansible_tmp_dir: /mnt/sdd/.ansible-malkerov/tmp
-
-# Use large disk for Ansible temporary files only for this profile.
-ansible_remote_tmp: /mnt/sdd/.ansible-malkerov/tmp
-
-# Store heavy Docker/Ollama data on the large disk.
-docker_engine_data_root: /mnt/sdd/docker
-
-ollama_container_base_dir: /mnt/sdd/llm/ollama
-ollama_container_compose_dir: /mnt/sdd/llm/ollama/compose
-ollama_container_data_dir: /mnt/sdd/llm/ollama/data
 
 # ------------------------------
-# rag_agent: пути на большом диске
+# RAG models
 # ------------------------------
-rag_agent_base_dir: /mnt/sdd/llm/rag-agent
-rag_agent_src_dir: /mnt/sdd/llm/rag-agent/src
-rag_agent_compose_dir: /mnt/sdd/llm/rag-agent/compose
-rag_agent_data_dir: /mnt/sdd/llm/rag-agent/data
-rag_agent_compose_file: /mnt/sdd/llm/rag-agent/compose/compose.yml
- 
-# Модели для RAG. Эти же модели прокидываем в ollama_pull_models_list ниже.
+# Эти же модели добавлены в ollama_pull_models_list ниже.
 rag_agent_chat_model: "llama3.2:1b"
 rag_agent_embedding_model: "nomic-embed-text"
- 
+
 # ------------------------------
-# open_webui: пути на большом диске + секрет
+# Open WebUI secret
 # ------------------------------
-open_webui_base_dir: /mnt/sdd/llm/open-webui
-open_webui_src_dir: /mnt/sdd/llm/open-webui/src
-open_webui_compose_dir: /mnt/sdd/llm/open-webui/compose
-open_webui_data_dir: /mnt/sdd/llm/open-webui/data
-open_webui_compose_file: /mnt/sdd/llm/open-webui/compose/compose.yml
- 
-# ВАЖНО:вынеси в Vault.
-open_webui_secret_key: "aadd6d6bbc33128f678472a10a76c1dae5dd52825e6835a10b5df426d930ba93"
- 
+# ВАЖНО: лучше вынести в Ansible Vault.
+open_webui_secret_key: "CHANGE_ME_USE_NEW_RANDOM_SECRET"
+
 # ------------------------------
-# Модели в Ollama — должны включать модели для RAG
+# Ollama models
 # ------------------------------
-# Переопределяем дефолтный список из all.yml. Подтянутся при
-# ansible-playbook site.yml --tags ollama_pull_models
+# Переопределяем дефолтный список из all.yml.
+# Подтянутся при ansible-playbook site.yml --tags ollama_pull_models
 ollama_pull_models_list:
   - smollm:135m
-  - "{{ rag_agent_chat_model }}"        # llama3.2:1b (для чата в RAG)
-  - "{{ rag_agent_embedding_model }}"   # nomic-embed-text (для embeddings)
+  - "{{ rag_agent_chat_model }}"
+  - "{{ rag_agent_embedding_model }}"
   # При необходимости добавь сюда модели для garak:
   # - qwen2.5:7b
