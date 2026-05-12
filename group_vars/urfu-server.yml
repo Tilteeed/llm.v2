@@ -65,4 +65,5 @@ ollama_pull_models_list:
 # ------------------------------
 # Временно отключено из-за проблемы установки garak==0.14.0
 # и зависимости mistralai==1.5.2.
+
 garak_runner_enable: false
