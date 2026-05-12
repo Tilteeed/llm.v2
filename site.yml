@@ -121,6 +121,7 @@
         - monitoring
 
     - role: garak_runner
+      when: garak_runner_enable | bool
       vars:
         garak_runner_use_custom_python: "{{ llm_use_custom_python }}"
         garak_runner_custom_python_binary: "{{ llm_custom_python_binary }}"

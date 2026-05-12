@@ -402,3 +402,8 @@ rag_agent_enable: true
 # ------------------------------
 # Дефолты в roles/open_webui_guardrails/defaults/main.yml. Здесь — только toggle.
 open_webui_enable: true
+
+# ------------------------------
+# garak_runner
+# ------------------------------
+garak_runner_enable: true

@@ -45,7 +45,7 @@ rag_agent_embedding_model: "nomic-embed-text"
 # Open WebUI secret
 # ------------------------------
 # ВАЖНО: лучше вынести в Ansible Vault.
-open_webui_secret_key: "CHANGE_ME_USE_NEW_RANDOM_SECRET"
+open_webui_secret_key: "aadd6d6bbc33128f678472a10a76c1dae5dd52825e6835a10b5df426d930ba93"
 
 # ------------------------------
 # Ollama models
@@ -58,3 +58,11 @@ ollama_pull_models_list:
   - "{{ rag_agent_embedding_model }}"
   # При необходимости добавь сюда модели для garak:
   # - qwen2.5:7b
+
+
+# ------------------------------
+# garak_runner
+# ------------------------------
+# Временно отключено из-за проблемы установки garak==0.14.0
+# и зависимости mistralai==1.5.2.
+garak_runner_enable: false
