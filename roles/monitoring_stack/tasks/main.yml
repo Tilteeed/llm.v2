@@ -78,9 +78,10 @@
   ansible.builtin.file:
     path: "{{ monitoring_stack_prometheus_data_dir }}"
     state: directory
-    owner: nobody
-    group: nogroup
+    owner: "65534"
+    group: "65534"
     mode: "0755"
+    recurse: true
   tags:
     - monitoring
     - filesystem
@@ -98,6 +99,7 @@
     owner: "472"
     group: "472"
     mode: "0755"
+    recurse: true
   tags:
     - monitoring
     - filesystem
