@@ -39,7 +39,7 @@ ubuntu_nvidia_validate_existing_driver: true
 # ------------------------------
 # Эти же модели добавлены в ollama_pull_models_list ниже.
 rag_agent_chat_model: "qwen2.5:14b"
-rag_agent_embedding_model: "nomic-embed-text"
+rag_agent_embedding_model: "nomic-embed-text:latest"
 
 # ------------------------------
 # Open WebUI secret
@@ -53,9 +53,9 @@ open_webui_secret_key: "aadd6d6bbc33128f678472a10a76c1dae5dd52825e6835a10b5df426
 # Переопределяем дефолтный список из all.yml.
 # Подтянутся при ansible-playbook site.yml --tags ollama_pull_models
 ollama_pull_models_list:
-  - smollm:135m
   - "{{ rag_agent_chat_model }}"
   - "{{ rag_agent_embedding_model }}"
+  - smollm:135m
   # При необходимости добавь сюда модели для garak:
   # - qwen2.5:7b
 
