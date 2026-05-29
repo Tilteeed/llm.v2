@@ -11,6 +11,7 @@ services:
       APP_PORT: "{{ rag_agent_internal_port }}"
       APP_HOST: "0.0.0.0"
       OLLAMA_BASE_URL: "{{ rag_agent_ollama_base_url }}"
+      NEMO_GUARDRAILS_OLLAMA_URL: "{{ rag_agent_nemo_guardrails_ollama_url }}"
       OLLAMA_CHAT_MODEL: "{{ rag_agent_chat_model }}"
       OLLAMA_EMBEDDING_MODEL: "{{ rag_agent_embedding_model }}"
       OLLAMA_TIMEOUT: "{{ rag_agent_ollama_timeout }}"

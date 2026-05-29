@@ -56,6 +56,12 @@ rag_agent_internal_port: 8000
 # минуя хост): закомментируй строку выше и раскомментируй ниже.
 rag_agent_ollama_base_url: "http://{{ ollama_container_name }}:{{ ollama_container_internal_port }}"
 
+# --- NeMo Guardrails внутри RAG ------------------------------
+# Новый код RAG читает эту переменную отдельно от OLLAMA_BASE_URL.
+# Без неё NeMo внутри контейнера может дефолтиться на localhost:11434.
+# По умолчанию используем тот же Ollama backend, что и сам RAG.
+rag_agent_nemo_guardrails_ollama_url: "{{ rag_agent_ollama_base_url }}"
+
 # --- Модели RAG ----------------------------------------------
 # Эти же модели ОБЯЗАНЫ быть в ollama_pull_models_list — иначе
 # /api/v1/chat будет возвращать 404 от Ollama.

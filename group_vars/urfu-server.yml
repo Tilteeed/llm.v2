@@ -38,7 +38,7 @@ ubuntu_nvidia_validate_existing_driver: true
 # RAG models
 # ------------------------------
 # Эти же модели добавлены в ollama_pull_models_list ниже.
-rag_agent_chat_model: "llama3.2:1b"
+rag_agent_chat_model: "qwen2.5:14b"
 rag_agent_embedding_model: "nomic-embed-text"
 
 # ------------------------------
