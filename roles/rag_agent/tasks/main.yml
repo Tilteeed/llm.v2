@@ -87,6 +87,14 @@
     - rag_agent
     - source
 
+- name: Strip UTF-8 BOM from RAG Dockerfile if present
+  ansible.builtin.shell: |
+    sed -i '1s/^\xEF\xBB\xBF//' {{ rag_agent_src_dir }}/Dockerfile
+  changed_when: false
+  tags:
+    - rag_agent
+    - source
+
 - name: Check whether shared Docker network exists
   ansible.builtin.command:
     argv:
