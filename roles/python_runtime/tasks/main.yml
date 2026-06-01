@@ -48,15 +48,72 @@
     - python_runtime
     - build
 
+- name: Check whether Python source archive already exists
+  ansible.builtin.stat:
+    path: "{{ python_runtime_source_archive }}"
+  register: python_runtime_source_archive_stat
+  tags:
+    - python_runtime
+    - python
+    - build
+
+- name: Validate existing Python source archive
+  ansible.builtin.command:
+    argv:
+      - tar
+      - -tzf
+      - "{{ python_runtime_source_archive }}"
+  register: python_runtime_existing_archive_check
+  changed_when: false
+  failed_when: false
+  when: python_runtime_source_archive_stat.stat.exists
+  tags:
+    - python_runtime
+    - python
+    - build
+
+- name: Remove broken Python source archive
+  ansible.builtin.file:
+    path: "{{ python_runtime_source_archive }}"
+    state: absent
+  when:
+    - python_runtime_source_archive_stat.stat.exists
+    - python_runtime_existing_archive_check.rc | default(0) != 0
+  tags:
+    - python_runtime
+    - python
+    - build
+
 - name: Download Python source archive
   ansible.builtin.get_url:
     url: "{{ python_runtime_source_url }}"
     dest: "{{ python_runtime_source_archive }}"
     mode: "0644"
+    timeout: "{{ python_runtime_download_timeout }}"
+  register: python_runtime_source_download
+  retries: "{{ python_runtime_download_retries }}"
+  delay: "{{ python_runtime_download_delay }}"
+  until: python_runtime_source_download is succeeded
+  when: >-
+    (not python_runtime_source_archive_stat.stat.exists)
+    or
+    (python_runtime_existing_archive_check.rc | default(1) != 0)
   tags:
     - python_runtime
+    - python
     - build
-    - download
+
+- name: Validate Python source archive after download
+  ansible.builtin.command:
+    argv:
+      - tar
+      - -tzf
+      - "{{ python_runtime_source_archive }}"
+  changed_when: false
+  tags:
+    - python_runtime
+    - python
+    - build
 
 - name: Extract Python source archive
   ansible.builtin.unarchive:
