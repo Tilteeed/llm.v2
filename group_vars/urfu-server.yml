@@ -74,8 +74,8 @@ garak_runner_enable: false
 langfuse_enable: true
 langfuse_external_host: "10.40.240.103"
 
-# Храним Langfuse на большом диске urfu-server.
-langfuse_base_dir: /mnt/sdd/llm/langfuse
+# Храним Langfuse в общем каталоге проекта.
+langfuse_base_dir: /opt/llm/langfuse
 langfuse_compose_dir: "{{ langfuse_base_dir }}/compose"
 langfuse_compose_file: "{{ langfuse_compose_dir }}/compose.yml"
 langfuse_env_file: "{{ langfuse_compose_dir }}/langfuse.env"
