@@ -34,6 +34,9 @@ services:
     depends_on: *langfuse-depends-on
     env_file:
       - {{ langfuse_env_file }}
+    environment:
+      HOSTNAME: "0.0.0.0"
+      PORT: "{{ langfuse_web_internal_port }}"
     ports:
       - "{{ langfuse_bind_address }}:{{ langfuse_web_host_port }}:{{ langfuse_web_internal_port }}"
     networks:
