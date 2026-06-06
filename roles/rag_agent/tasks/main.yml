@@ -139,18 +139,34 @@
     - observability
 
 - name: Pass Langfuse callbacks into LangGraph ainvoke
-  ansible.builtin.replace:
-    path: "{{ rag_agent_src_dir }}/src/rag_agent/agents/main_agent.py"
-    regexp: '            result = await self\.graph\.ainvoke\(inputs\)'
-    replace: |-
-      \            result = await self.graph.ainvoke(
-                      inputs,
-                      config=langchain_config(
-                          session_id=thread_id,
-                          tags=["rag-agent", "agent-chat"],
-                          metadata={"endpoint": "agent-chat"},
-                      ),
-                  )
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    from pathlib import Path
+
+    path = Path("{{ rag_agent_src_dir }}/src/rag_agent/agents/main_agent.py")
+    text = path.read_text(encoding="utf-8")
+
+    old = "            result = await self.graph.ainvoke(inputs)"
+
+    new = """            result = await self.graph.ainvoke(
+                inputs,
+                config=langchain_config(
+                    session_id=thread_id,
+                    tags=["rag-agent", "agent-chat"],
+                    metadata={"endpoint": "agent-chat"},
+                ),
+            )"""
+
+    if new in text:
+        print("already patched")
+    elif old in text:
+        path.write_text(text.replace(old, new), encoding="utf-8")
+        print("patched")
+    else:
+        raise SystemExit("target line not found in main_agent.py")
+    PY
+  register: rag_agent_langfuse_ainvoke_patch
+  changed_when: "'patched' in rag_agent_langfuse_ainvoke_patch.stdout"
   when: rag_agent_langfuse_enable | bool
   tags:
     - rag_agent
