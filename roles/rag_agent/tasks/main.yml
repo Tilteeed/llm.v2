@@ -166,7 +166,150 @@
         raise SystemExit("target line not found in main_agent.py")
     PY
   register: rag_agent_langfuse_ainvoke_patch
-  changed_when: "'patched' in rag_agent_langfuse_ainvoke_patch.stdout"
+  changed_when: "rag_agent_langfuse_ainvoke_patch.stdout.strip() == 'patched'"
+  when: rag_agent_langfuse_enable | bool
+  tags:
+    - rag_agent
+    - langfuse
+    - observability
+
+- name: Instrument direct RAG chat endpoint with Langfuse
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    from pathlib import Path
+
+    path = Path("{{ rag_agent_src_dir }}/src/rag_agent/main.py")
+    text = path.read_text(encoding="utf-8")
+    changed = False
+
+    # 1. Добавляем импорт observability helper.
+    import_anchor = "from .core.config import get_settings"
+    import_line = "from .core.observability import observe, update_trace, langfuse_observation"
+
+    if import_line not in text:
+        if import_anchor not in text:
+            raise SystemExit("import anchor not found in main.py")
+        text = text.replace(import_anchor, import_anchor + "\n" + import_line)
+        changed = True
+
+    # 2. Добавляем @observe над _guarded_rag_chat.
+    func_def = "async def _guarded_rag_chat(request: RAGChatRequest):"
+    decorated_func_def = (
+        '@observe(name="rag-chat")\n'
+        "async def _guarded_rag_chat(request: RAGChatRequest):"
+    )
+
+    if decorated_func_def not in text:
+        if func_def not in text:
+            raise SystemExit("_guarded_rag_chat function definition not found")
+        text = text.replace(func_def, decorated_func_def)
+        changed = True
+
+    # 3. В начало _guarded_rag_chat добавляем update_trace.
+    old_start = (
+        '@observe(name="rag-chat")\n'
+        "async def _guarded_rag_chat(request: RAGChatRequest):\n"
+        "    blocked = await _check_input_guardrail(request.message)"
+    )
+
+    new_start = (
+        '@observe(name="rag-chat")\n'
+        "async def _guarded_rag_chat(request: RAGChatRequest):\n"
+        "    update_trace(\n"
+        '        name="rag-chat",\n'
+        "        session_id=request.thread_id,\n"
+        '        tags=["rag-agent", "rag-chat"],\n'
+        '        input={"message": request.message, "top_k": request.top_k},\n'
+        '        metadata={"endpoint": "rag-chat"},\n'
+        "    )\n"
+        "\n"
+        "    blocked = await _check_input_guardrail(request.message)"
+    )
+
+    if 'metadata={"endpoint": "rag-chat"}' not in text:
+        if old_start not in text:
+            raise SystemExit("_guarded_rag_chat start block not found")
+        text = text.replace(old_start, new_start)
+        changed = True
+
+    # 4. Оборачиваем retrieval в отдельный span.
+    old_retrieval = (
+        "    retrieval_result = await retrieval_service.retrieve_context(\n"
+        "        query=request.message,\n"
+        "        top_k=request.top_k,\n"
+        "    )\n"
+        "    contexts = retrieval_result.contexts"
+    )
+
+    new_retrieval = (
+        "    with langfuse_observation(\n"
+        '        name="rag-retrieval",\n'
+        '        as_type="span",\n'
+        '        input={"query": request.message, "top_k": request.top_k},\n'
+        '        metadata={"endpoint": "rag-chat"},\n'
+        "    ) as retrieval_span:\n"
+        "        retrieval_result = await retrieval_service.retrieve_context(\n"
+        "            query=request.message,\n"
+        "            top_k=request.top_k,\n"
+        "        )\n"
+        "        contexts = retrieval_result.contexts\n"
+        "\n"
+        "        if retrieval_span is not None:\n"
+        "            retrieval_span.update(\n"
+        "                output={\n"
+        '                    "context_count": len(contexts),\n'
+        '                    "contexts": [\n'
+        "                        {\n"
+        '                            "source": context.source,\n'
+        '                            "chunk_id": context.chunk_id,\n'
+        '                            "text_preview": context.text[:500],\n'
+        "                        }\n"
+        "                        for context in contexts\n"
+        "                    ],\n"
+        "                }\n"
+        "            )"
+    )
+
+    if 'name="rag-retrieval"' not in text:
+        if old_retrieval not in text:
+            raise SystemExit("retrieval block not found in main.py")
+        text = text.replace(old_retrieval, new_retrieval)
+        changed = True
+
+    # 5. Оборачиваем прямой вызов Ollama в generation observation.
+    old_generation = "    answer = await rag_llm_service.generate(prompt)"
+
+    new_generation = (
+        "    with langfuse_observation(\n"
+        '        name="rag-ollama-generate",\n'
+        '        as_type="generation",\n'
+        "        input=prompt,\n"
+        "        model=settings.ollama_chat_model,\n"
+        "        metadata={\n"
+        '            "endpoint": "rag-chat",\n'
+        '            "context_count": len(contexts),\n'
+        "        },\n"
+        "    ) as generation:\n"
+        "        answer = await rag_llm_service.generate(prompt)\n"
+        "\n"
+        "        if generation is not None:\n"
+        "            generation.update(output=answer)"
+    )
+
+    if 'name="rag-ollama-generate"' not in text:
+        if old_generation not in text:
+            raise SystemExit("generation block not found in main.py")
+        text = text.replace(old_generation, new_generation)
+        changed = True
+
+    if changed:
+        path.write_text(text, encoding="utf-8")
+        print("patched")
+    else:
+        print("already patched")
+    PY
+  register: rag_agent_langfuse_rag_chat_patch
+  changed_when: "rag_agent_langfuse_rag_chat_patch.stdout.strip() == 'patched'"
   when: rag_agent_langfuse_enable | bool
   tags:
     - rag_agent
