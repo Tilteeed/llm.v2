@@ -95,6 +95,68 @@
     - rag_agent
     - source
 
+# ------------------------------------------------------------
+# Langfuse overlay.
+# Накладываем патч на исходники RAG-agent после git clone
+# и до docker build.
+# ------------------------------------------------------------
+
+- name: Copy Langfuse observability helper into RAG source
+  ansible.builtin.copy:
+    src: observability.py
+    dest: "{{ rag_agent_src_dir }}/src/rag_agent/core/observability.py"
+    owner: root
+    group: root
+    mode: "0644"
+  when: rag_agent_langfuse_enable | bool
+  tags:
+    - rag_agent
+    - langfuse
+    - observability
+
+- name: Add langfuse dependency to pyproject.toml
+  ansible.builtin.lineinfile:
+    path: "{{ rag_agent_src_dir }}/pyproject.toml"
+    insertafter: '^\s*"python-multipart",'
+    line: '    "langfuse>=3,<4",'
+    state: present
+  when: rag_agent_langfuse_enable | bool
+  tags:
+    - rag_agent
+    - langfuse
+    - observability
+
+- name: Import langchain_config in main_agent.py
+  ansible.builtin.lineinfile:
+    path: "{{ rag_agent_src_dir }}/src/rag_agent/agents/main_agent.py"
+    insertafter: '^from \.\.core\.config import get_settings'
+    line: 'from ..core.observability import langchain_config'
+    state: present
+  when: rag_agent_langfuse_enable | bool
+  tags:
+    - rag_agent
+    - langfuse
+    - observability
+
+- name: Pass Langfuse callbacks into LangGraph ainvoke
+  ansible.builtin.replace:
+    path: "{{ rag_agent_src_dir }}/src/rag_agent/agents/main_agent.py"
+    regexp: '            result = await self\.graph\.ainvoke\(inputs\)'
+    replace: |-
+      \            result = await self.graph.ainvoke(
+                      inputs,
+                      config=langchain_config(
+                          session_id=thread_id,
+                          tags=["rag-agent", "agent-chat"],
+                          metadata={"endpoint": "agent-chat"},
+                      ),
+                  )
+  when: rag_agent_langfuse_enable | bool
+  tags:
+    - rag_agent
+    - langfuse
+    - observability
+
 - name: Check whether shared Docker network exists
   ansible.builtin.command:
     argv:

@@ -22,6 +22,14 @@ services:
       MAX_UPLOAD_SIZE_BYTES: "{{ rag_agent_max_upload_size_bytes }}"
       ALLOWED_DOCUMENT_EXTENSIONS: "{{ rag_agent_allowed_document_extensions }}"
       UI_ENABLED: "{{ rag_agent_ui_enabled | string | lower }}"
+      # --- Langfuse tracing ---
+      # LANGFUSE_BASE_URL — актуальное имя в новых SDK.
+      # LANGFUSE_HOST оставляем для совместимости с SDK v3/старыми примерами.
+      LANGFUSE_BASE_URL: "{{ rag_agent_langfuse_host }}"
+      LANGFUSE_HOST: "{{ rag_agent_langfuse_host }}"
+      LANGFUSE_PUBLIC_KEY: "{{ rag_agent_langfuse_public_key }}"
+      LANGFUSE_SECRET_KEY: "{{ rag_agent_langfuse_secret_key }}"
+      LANGFUSE_TRACING_ENABLED: "{{ rag_agent_langfuse_enable | string | lower }}"
     volumes:
       # Папка с индексом и загруженными документами — наружу,
       # чтобы переживало рестарт контейнера.

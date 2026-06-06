@@ -74,3 +74,9 @@ rag_agent_ui_enabled: true
 # --- Healthcheck --------------------------------------------
 rag_agent_healthcheck_retries: 30
 rag_agent_healthcheck_delay: 5
+
+# --- Langfuse ------------------------------------------------
+rag_agent_langfuse_enable: true
+rag_agent_langfuse_host: "http://langfuse-web:3000"
+rag_agent_langfuse_public_key: "{{ langfuse_init_project_public_key }}"
+rag_agent_langfuse_secret_key: "{{ langfuse_init_project_secret_key }}"
