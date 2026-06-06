@@ -1,0 +1,256 @@
+---
+# ============================================================
+# tasks/main.yml
+# Роль: langfuse_stack
+#
+# Что делает:
+# 1. Проверяет Docker.
+# 2. Проверяет, что секреты не остались заглушками.
+# 3. Создаёт каталоги.
+# 4. Создаёт общую Docker-сеть llm_stack_net, если её нет.
+# 5. Рендерит langfuse.env и compose.yml.
+# 6. Поднимает Langfuse stack.
+# 7. Ждёт готовности Langfuse UI/API.
+# ============================================================
+
+# ------------------------------------------------------------
+# Docker prereq
+# ------------------------------------------------------------
+
+- name: Validate Docker CLI before Langfuse deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  changed_when: false
+  tags:
+    - langfuse
+    - validation
+    - prereq
+
+- name: Validate Docker daemon before Langfuse deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  changed_when: false
+  tags:
+    - langfuse
+    - validation
+    - prereq
+
+# ------------------------------------------------------------
+# Защита от запуска с дефолтными секретами.
+# ------------------------------------------------------------
+
+- name: Validate Langfuse encryption key format
+  ansible.builtin.assert:
+    that:
+      - langfuse_encryption_key is match('^[0-9a-fA-F]{64}$')
+      - langfuse_encryption_key != '0000000000000000000000000000000000000000000000000000000000000000'
+    fail_msg: >-
+      langfuse_encryption_key должен быть реальным ключом на 64 hex-символа.
+      Сгенерируй: openssl rand -hex 32
+    success_msg: "Langfuse ENCRYPTION_KEY выглядит корректно."
+  tags:
+    - langfuse
+    - validation
+
+- name: Validate Langfuse secrets are not placeholders
+  ansible.builtin.assert:
+    that:
+      - "'CHANGE_ME' not in langfuse_nextauth_secret"
+      - "'CHANGE_ME' not in langfuse_salt"
+      - "'CHANGE_ME' not in langfuse_postgres_password"
+      - "'CHANGE_ME' not in langfuse_clickhouse_password"
+      - "'CHANGE_ME' not in langfuse_redis_auth"
+      - "'CHANGE_ME' not in langfuse_minio_root_password"
+      - "'CHANGE_ME' not in langfuse_init_user_password"
+      - "'CHANGE-ME' not in langfuse_init_project_public_key"
+      - "'CHANGE-ME' not in langfuse_init_project_secret_key"
+      - langfuse_init_project_public_key is match('^pk-lf-.+')
+      - langfuse_init_project_secret_key is match('^sk-lf-.+')
+    fail_msg: >-
+      В Langfuse остались значения-заглушки. Задай реальные значения
+      в group_vars/urfu-server.yml.
+    success_msg: "Langfuse secrets не похожи на заглушки."
+  tags:
+    - langfuse
+    - validation
+
+# ------------------------------------------------------------
+# Каталоги.
+# ------------------------------------------------------------
+
+- name: Ensure Langfuse base directory exists
+  ansible.builtin.file:
+    path: "{{ langfuse_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - langfuse
+    - filesystem
+
+- name: Ensure Langfuse compose directory exists
+  ansible.builtin.file:
+    path: "{{ langfuse_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - langfuse
+    - filesystem
+
+# ------------------------------------------------------------
+# Общая сеть проекта.
+# langfuse-web должен быть в той же сети, что rag-agent/open-webui.
+# ------------------------------------------------------------
+
+- name: Check whether shared Docker network already exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - "{{ langfuse_shared_network_name }}"
+  register: langfuse_shared_network_check
+  changed_when: false
+  failed_when: false
+  when: langfuse_create_shared_network | bool
+  tags:
+    - langfuse
+    - network
+
+- name: Create shared Docker network if missing
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - create
+      - "{{ langfuse_shared_network_name }}"
+  when:
+    - langfuse_create_shared_network | bool
+    - langfuse_shared_network_check.rc != 0
+  changed_when: true
+  tags:
+    - langfuse
+    - network
+
+# ------------------------------------------------------------
+# Рендер env-файла.
+# mode 0600, потому что внутри секреты.
+# ------------------------------------------------------------
+
+- name: Render Langfuse env file
+  ansible.builtin.template:
+    src: langfuse.env.j2
+    dest: "{{ langfuse_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: langfuse_stack_restart
+  tags:
+    - langfuse
+    - config
+
+# ------------------------------------------------------------
+# Рендер compose-файла.
+# ------------------------------------------------------------
+
+- name: Render Langfuse docker compose file
+  ansible.builtin.template:
+    src: langfuse-compose.yml.j2
+    dest: "{{ langfuse_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: langfuse_stack_restart
+  tags:
+    - langfuse
+    - compose
+    - config
+
+# ------------------------------------------------------------
+# Старт стека.
+# Первый pull может быть долгим: postgres/clickhouse/minio/langfuse.
+# ------------------------------------------------------------
+
+- name: Start Langfuse compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ langfuse_compose_file }}"
+      - --env-file
+      - "{{ langfuse_env_file }}"
+      - up
+      - -d
+  register: langfuse_compose_up
+  changed_when: >-
+    'Started' in langfuse_compose_up.stdout
+    or 'Creating' in langfuse_compose_up.stdout
+    or 'Created' in langfuse_compose_up.stdout
+    or 'Recreating' in langfuse_compose_up.stdout
+    or 'Pulling' in langfuse_compose_up.stdout
+  async: 1800
+  poll: 15
+  tags:
+    - langfuse
+    - compose
+    - deploy
+
+- name: Flush handlers to restart Langfuse stack immediately if needed
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - langfuse
+    - compose
+    - deploy
+
+# ------------------------------------------------------------
+# Healthcheck.
+# /api/public/ready должен вернуть 200.
+# Первый старт может занять 1-3 минуты из-за ClickHouse и миграций.
+# ------------------------------------------------------------
+
+- name: Wait until Langfuse web is ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ langfuse_web_host_port }}/api/public/ready"
+    method: GET
+    status_code: 200
+    timeout: 10
+  register: langfuse_ready_check
+  retries: "{{ langfuse_healthcheck_retries }}"
+  delay: "{{ langfuse_healthcheck_delay }}"
+  until: langfuse_ready_check.status == 200
+  changed_when: false
+  tags:
+    - langfuse
+    - validation
+    - healthcheck
+
+# ------------------------------------------------------------
+# Финальный вывод.
+# ------------------------------------------------------------
+
+- name: Show final Langfuse deployment validation output
+  ansible.builtin.debug:
+    msg:
+      - "Langfuse deployment completed successfully."
+      - "UI external:  {{ langfuse_public_url }}"
+      - "UI local:     http://127.0.0.1:{{ langfuse_web_host_port }}"
+      - "Internal URL: {{ langfuse_internal_url }}"
+      - "Login user:   {{ langfuse_init_user_email }}"
+      - "Project:      {{ langfuse_init_project_name }}"
+      - "Public key:   {{ langfuse_init_project_public_key }}"
+      - "Secret key:   hidden"
+      - ""
+      - "Next step after Langfuse is ready:"
+      - "ansible-playbook site.yml --tags rag_agent"
+  tags:
+    - langfuse
+    - validation

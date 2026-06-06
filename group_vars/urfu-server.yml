@@ -67,3 +67,50 @@ ollama_pull_models_list:
 # и зависимости mistralai==1.5.2.
 
 garak_runner_enable: false
+
+# ------------------------------
+# Langfuse stack
+# ------------------------------
+langfuse_enable: true
+langfuse_external_host: "10.40.240.103"
+
+# Храним Langfuse на большом диске urfu-server.
+langfuse_base_dir: /mnt/sdd/llm/langfuse
+langfuse_compose_dir: "{{ langfuse_base_dir }}/compose"
+langfuse_compose_file: "{{ langfuse_compose_dir }}/compose.yml"
+langfuse_env_file: "{{ langfuse_compose_dir }}/langfuse.env"
+
+# --- служебные секреты Langfuse ---
+# langfuse_encryption_key должен быть ровно 64 hex-символа.
+
+langfuse_encryption_key: "2a38077b462047bb931597da58e089e859943366a433c1e90d1ee6a75713f1dd"
+langfuse_nextauth_secret: "E0VstksjkPoZKcB7pzMOn/I5X88kIGf94FQBHF1cYYU="
+langfuse_salt: "X+qM7T9hb3V3j38OMpG6R3TkSPCJvfsjnzVX2NVjgMI="
+
+# --- пароли внутренних сервисов Langfuse ---
+langfuse_postgres_password: "VgLi4wUHhyI+X5xxuHvwYWR4WM4LqAMw"
+langfuse_clickhouse_password: "VsUY1vdbUGy6LA0lHp4G20wUQshFbJMP"
+langfuse_redis_auth: "N/bxl4daN/hing7/uTsudVEUCw7YqMDC"
+langfuse_minio_root_password: "CVSwI0qb0P5IsTVC3j2xJrhAa9i5f/xO"
+
+# Для закрытого стенда выключаем анонимную телеметрию.
+langfuse_telemetry_enabled: "false"
+
+# --- bootstrap пользователя / организации / проекта ---
+langfuse_init_user_email: "tilteeed@gmail.com"
+langfuse_init_user_name: "Alex"
+langfuse_init_user_password: "mGBQdpbvJT7Tno1qN6sgV11z"
+
+langfuse_init_org_id: "llm-polygon"
+langfuse_init_org_name: "LLM Polygon"
+
+langfuse_init_project_id: "rag-agent"
+langfuse_init_project_name: "rag-agent"
+
+
+# Эти ключи потом прокинем в rag-agent.
+langfuse_init_project_public_key: "pk-lf-urfu-polygon"
+langfuse_init_project_secret_key: "sk-lf-88e9fbb211c90dda438fa58367c78ec983037952e93072f1"
+
+
+

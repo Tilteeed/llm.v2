@@ -1,0 +1,20 @@
+---
+# ============================================================
+# handlers/main.yml
+# Роль: langfuse_stack
+# ============================================================
+
+- name: Restart Langfuse compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ langfuse_compose_file }}"
+      - --env-file
+      - "{{ langfuse_env_file }}"
+      - up
+      - -d
+      - --force-recreate
+  listen: langfuse_stack_restart
+  changed_when: true

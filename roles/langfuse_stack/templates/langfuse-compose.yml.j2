@@ -1,0 +1,139 @@
+# =========================================================================
+# Managed by Ansible role: langfuse_stack. Не редактировать вручную.
+#
+# Langfuse web публикуется наружу на {{ langfuse_web_host_port }},
+# потому что 3000 уже занят Grafana.
+#
+# Внутри Docker-сети RAG-agent будет ходить на:
+# http://{{ langfuse_web_container_name }}:{{ langfuse_web_internal_port }}
+# =========================================================================
+
+services:
+  langfuse-worker:
+    image: {{ langfuse_worker_image }}
+    container_name: {{ langfuse_worker_container_name }}
+    restart: {{ langfuse_restart_policy }}
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - {{ langfuse_env_file }}
+    networks:
+      - {{ langfuse_internal_network_name }}
+
+  langfuse-web:
+    image: {{ langfuse_web_image }}
+    container_name: {{ langfuse_web_container_name }}
+    restart: {{ langfuse_restart_policy }}
+    depends_on: *langfuse-depends-on
+    env_file:
+      - {{ langfuse_env_file }}
+    ports:
+      - "{{ langfuse_bind_address }}:{{ langfuse_web_host_port }}:{{ langfuse_web_internal_port }}"
+    networks:
+      - {{ langfuse_internal_network_name }}
+      - {{ langfuse_shared_network_name }}
+
+  clickhouse:
+    image: {{ langfuse_clickhouse_image }}
+    container_name: {{ langfuse_clickhouse_container_name }}
+    restart: {{ langfuse_restart_policy }}
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: "{{ langfuse_clickhouse_user }}"
+      CLICKHOUSE_PASSWORD: "{{ langfuse_clickhouse_password }}"
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    networks:
+      - {{ langfuse_internal_network_name }}
+
+  minio:
+    image: {{ langfuse_minio_image }}
+    container_name: {{ langfuse_minio_container_name }}
+    restart: {{ langfuse_restart_policy }}
+    entrypoint: sh
+    command: -c 'mkdir -p /data/{{ langfuse_s3_bucket }} && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: "{{ langfuse_minio_root_user }}"
+      MINIO_ROOT_PASSWORD: "{{ langfuse_minio_root_password }}"
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    networks:
+      - {{ langfuse_internal_network_name }}
+
+  redis:
+    image: {{ langfuse_redis_image }}
+    container_name: {{ langfuse_redis_container_name }}
+    restart: {{ langfuse_restart_policy }}
+    command: >
+      --requirepass {{ langfuse_redis_auth }}
+      --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '{{ langfuse_redis_auth }}' ping | grep PONG"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks:
+      - {{ langfuse_internal_network_name }}
+
+  postgres:
+    image: {{ langfuse_postgres_image }}
+    container_name: {{ langfuse_postgres_container_name }}
+    restart: {{ langfuse_restart_policy }}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ langfuse_postgres_user }}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: "{{ langfuse_postgres_user }}"
+      POSTGRES_PASSWORD: "{{ langfuse_postgres_password }}"
+      POSTGRES_DB: "{{ langfuse_postgres_db }}"
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    networks:
+      - {{ langfuse_internal_network_name }}
+
+volumes:
+  langfuse_postgres_data:
+    driver: local
+  langfuse_clickhouse_data:
+    driver: local
+  langfuse_clickhouse_logs:
+    driver: local
+  langfuse_minio_data:
+    driver: local
+  langfuse_redis_data:
+    driver: local
+
+networks:
+  {{ langfuse_internal_network_name }}:
+    name: {{ langfuse_internal_network_name }}
+    driver: bridge
+
+  {{ langfuse_shared_network_name }}:
+    external: true

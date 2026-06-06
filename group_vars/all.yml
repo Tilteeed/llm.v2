@@ -407,3 +407,9 @@ open_webui_enable: true
 # garak_runner
 # ------------------------------
 garak_runner_enable: true
+
+# ------------------------------
+# langfuse_stack
+# ------------------------------
+# Общий тумблер Langfuse. Если false — роль langfuse_stack не запускается.
+langfuse_enable: true

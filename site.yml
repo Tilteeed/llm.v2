@@ -96,6 +96,17 @@
         - ollama_models
         - pull_models
 
+    # === НОВОЕ: Langfuse observability stack ===
+    # Langfuse UI/API + worker + postgres + clickhouse + redis + minio.
+    # Ставим до rag_agent, чтобы потом RAG мог сразу отправлять трейсы.
+    - role: langfuse_stack
+      when: langfuse_enable | bool
+      tags:
+        - langfuse_stack
+        - langfuse
+        - observability
+
+
     # === НОВОЕ: RAG agent backend (зависит от Ollama + моделей) ===
     - role: rag_agent
       when: rag_agent_enable | bool
