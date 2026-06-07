@@ -80,3 +80,10 @@ rag_agent_langfuse_enable: true
 rag_agent_langfuse_host: "http://langfuse-web:3000"
 rag_agent_langfuse_public_key: "{{ langfuse_init_project_public_key }}"
 rag_agent_langfuse_secret_key: "{{ langfuse_init_project_secret_key }}"
+# --- RAG retrieval exact lookup ------------------------------------------
+# Улучшает поиск по точным техническим идентификаторам:
+# AML.T0070, AML.T0069.002, AML.CS0031, AML.TA0007 и т.п.
+#
+# Без этого обычный vector search может плохо искать exact ID и возвращать
+# похожие chunks вместо точного совпадения.
+rag_agent_exact_id_lookup_enable: true

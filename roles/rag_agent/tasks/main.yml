@@ -316,6 +316,204 @@
     - langfuse
     - observability
 
+- name: Add exact ID lookup to RAG retrieval service
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    from pathlib import Path
+
+    path = Path("{{ rag_agent_src_dir }}/src/rag_agent/services/retrieval_service.py")
+    text = path.read_text(encoding="utf-8")
+    changed = False
+
+    # 1. Добавляем import re.
+    if "import re\n" not in text:
+        if "from pathlib import Path\n" not in text:
+            raise SystemExit("import anchor 'from pathlib import Path' not found")
+        text = text.replace(
+            "from pathlib import Path\n",
+            "from pathlib import Path\nimport re\n",
+            1,
+        )
+        changed = True
+
+    # 2. Меняем retrieve_context на hybrid: exact ID search + vector search.
+    old_retrieve_context = (
+        "    async def retrieve_context(self, query: str, top_k: int | None = None) -> RetrievalResult:\n"
+        "        query_embedding = await self._llm_service.embed(query)\n"
+        "        records = self._vector_store.load()\n"
+        "        limit = top_k or self._settings.default_top_k\n"
+        "\n"
+        "        scored = [\n"
+        "            (cosine_similarity(query_embedding, record.embedding), record)\n"
+        "            for record in records\n"
+        "        ]\n"
+        "        scored.sort(key=lambda item: item[0], reverse=True)\n"
+        "\n"
+        "        contexts: list[ContextItem] = []\n"
+        "\n"
+        "        for score, record in scored[:limit]:\n"
+        "            if score < self._settings.min_retrieval_score:\n"
+        "                continue\n"
+        "\n"
+        "            contexts.append(self._record_to_context(record))\n"
+        "\n"
+        "        if not contexts:\n"
+        "            contexts = self._fallback_contexts(query, records, limit)\n"
+        "\n"
+        "        return RetrievalResult(contexts=contexts)\n"
+    )
+
+    new_retrieve_context = (
+        "    async def retrieve_context(self, query: str, top_k: int | None = None) -> RetrievalResult:\n"
+        "        query_embedding = await self._llm_service.embed(query)\n"
+        "        records = self._vector_store.load()\n"
+        "        limit = top_k or self._settings.default_top_k\n"
+        "\n"
+        "        # Exact ID lookup is important for MITRE-style identifiers:\n"
+        "        # AML.T0070, AML.T0069.002, AML.CS0031, AML.TA0007, etc.\n"
+        "        # Embedding search is not reliable for exact technical IDs,\n"
+        "        # so exact matches are placed before semantic results.\n"
+        "        contexts: list[ContextItem] = self._exact_id_contexts(query, records, limit)\n"
+        "        seen_chunk_ids = {context.chunk_id for context in contexts}\n"
+        "\n"
+        "        scored = [\n"
+        "            (cosine_similarity(query_embedding, record.embedding), record)\n"
+        "            for record in records\n"
+        "        ]\n"
+        "        scored.sort(key=lambda item: item[0], reverse=True)\n"
+        "\n"
+        "        for score, record in scored:\n"
+        "            if len(contexts) >= limit:\n"
+        "                break\n"
+        "\n"
+        "            if record.chunk_id in seen_chunk_ids:\n"
+        "                continue\n"
+        "\n"
+        "            if score < self._settings.min_retrieval_score:\n"
+        "                continue\n"
+        "\n"
+        "            context = self._record_to_context(record)\n"
+        "            contexts.append(context)\n"
+        "            seen_chunk_ids.add(context.chunk_id)\n"
+        "\n"
+        "        if not contexts:\n"
+        "            contexts = self._fallback_contexts(query, records, limit)\n"
+        "\n"
+        "        return RetrievalResult(contexts=contexts)\n"
+    )
+
+    if new_retrieve_context not in text:
+        if old_retrieve_context not in text:
+            raise SystemExit("retrieve_context block not found or already changed unexpectedly")
+        text = text.replace(old_retrieve_context, new_retrieve_context)
+        changed = True
+
+    # 3. Добавляем helper-функции перед _fallback_contexts.
+    fallback_marker = (
+        "    def _fallback_contexts(\n"
+        "        self,\n"
+        "        query: str,\n"
+        "        records: list[VectorRecord],\n"
+        "        limit: int,\n"
+        "    ) -> list[ContextItem]:\n"
+    )
+
+    helpers = (
+        "    def _extract_exact_ids(self, query: str) -> list[str]:\n"
+        "        \"\"\"Extract exact MITRE ATLAS-like identifiers from the user query.\"\"\"\n"
+        "        matches = re.findall(\n"
+        "            r\"\\bAML\\.(?:T|TA|CS)\\d{4}(?:\\.\\d{3})?\\b\",\n"
+        "            query.upper(),\n"
+        "        )\n"
+        "        return list(dict.fromkeys(matches))\n"
+        "\n"
+        "    def _exact_id_contexts(\n"
+        "        self,\n"
+        "        query: str,\n"
+        "        records: list[VectorRecord],\n"
+        "        limit: int,\n"
+        "    ) -> list[ContextItem]:\n"
+        "        exact_ids = self._extract_exact_ids(query)\n"
+        "        if not exact_ids:\n"
+        "            return []\n"
+        "\n"
+        "        def exact_rank(record: VectorRecord) -> tuple[int, str, int]:\n"
+        "            text_upper = record.text.upper()\n"
+        "\n"
+        "            # Best match: the actual id field.\n"
+        "            for exact_id in exact_ids:\n"
+        "                if f\"ID: {exact_id}\" in text_upper or f\"**ID:** `{exact_id}`\" in text_upper:\n"
+        "                    return (0, record.metadata.get(\"filename\", \"\"), self._chunk_index(record))\n"
+        "\n"
+        "            # Good match: section/header with the technique/case-study id.\n"
+        "            for exact_id in exact_ids:\n"
+        "                if f\"TECHNIQUE: {exact_id}\" in text_upper or f\"CASE STUDY: {exact_id}\" in text_upper:\n"
+        "                    return (1, record.metadata.get(\"filename\", \"\"), self._chunk_index(record))\n"
+        "\n"
+        "            # Weak match: any reference/link mentioning the id.\n"
+        "            return (2, record.metadata.get(\"filename\", \"\"), self._chunk_index(record))\n"
+        "\n"
+        "        matching_records = [\n"
+        "            record\n"
+        "            for record in records\n"
+        "            if any(exact_id in record.text.upper() for exact_id in exact_ids)\n"
+        "        ]\n"
+        "\n"
+        "        matching_records.sort(key=exact_rank)\n"
+        "\n"
+        "        contexts: list[ContextItem] = []\n"
+        "        seen_chunk_ids: set[str] = set()\n"
+        "\n"
+        "        for record in matching_records:\n"
+        "            if len(contexts) >= limit:\n"
+        "                break\n"
+        "\n"
+        "            if record.chunk_id in seen_chunk_ids:\n"
+        "                continue\n"
+        "\n"
+        "            context = self._record_to_context(record)\n"
+        "            contexts.append(context)\n"
+        "            seen_chunk_ids.add(record.chunk_id)\n"
+        "\n"
+        "        return contexts\n"
+        "\n"
+    )
+
+    if "def _exact_id_contexts(" not in text:
+        if fallback_marker not in text:
+            raise SystemExit("_fallback_contexts marker not found")
+        text = text.replace(fallback_marker, helpers + fallback_marker)
+        changed = True
+
+    if changed:
+        path.write_text(text, encoding="utf-8")
+        print("patched")
+    else:
+        print("already patched")
+    PY
+  register: rag_agent_exact_id_lookup_patch
+  changed_when: "rag_agent_exact_id_lookup_patch.stdout.strip() == 'patched'"
+  when: rag_agent_exact_id_lookup_enable | bool
+  tags:
+    - rag_agent
+    - retrieval
+    - exact_lookup
+
+- name: Validate patched RAG retrieval service syntax
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - py_compile
+      - "{{ rag_agent_src_dir }}/src/rag_agent/services/retrieval_service.py"
+  changed_when: false
+  when: rag_agent_exact_id_lookup_enable | bool
+  tags:
+    - rag_agent
+    - retrieval
+    - exact_lookup
+    - validation
+
 - name: Check whether shared Docker network exists
   ansible.builtin.command:
     argv:
