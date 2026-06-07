@@ -95,6 +95,15 @@
     - rag_agent
     - source
 
+- name: Patch RAG Dockerfile to not require bundled data directory
+  ansible.builtin.replace:
+    path: "{{ rag_agent_src_dir }}/Dockerfile"
+    regexp: '^COPY\s+data\s+\./data\s*$'
+    replace: 'RUN mkdir -p ./data'
+  tags:
+    - rag_agent
+    - docker
+    - build
 # ------------------------------------------------------------
 # Langfuse overlay.
 # Накладываем патч на исходники RAG-agent после git clone
