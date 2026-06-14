@@ -57,3 +57,14 @@ open_webui_secret_key: "aadd6d6bbc33128f678472a10a76c1dae5dd52825e6835a10b5df426
 # --- Healthcheck --------------------------------------------
 open_webui_healthcheck_retries: 60
 open_webui_healthcheck_delay: 10
+
+# --- Langfuse tracing for Open WebUI -------------------------
+# Используется filter function из newWebLLM:
+# functions/langfuse_filter.py
+open_webui_langfuse_enable: true
+open_webui_langfuse_host: "http://langfuse-web:3000"
+open_webui_langfuse_public_key: "{{ langfuse_init_project_public_key }}"
+open_webui_langfuse_secret_key: "{{ langfuse_init_project_secret_key }}"
+
+# Каталог функций Open WebUI на host-volume.
+open_webui_functions_dir: "{{ open_webui_data_dir }}/functions"

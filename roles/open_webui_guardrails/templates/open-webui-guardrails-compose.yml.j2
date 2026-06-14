@@ -9,6 +9,12 @@ services:
       OLLAMA_BASE_URL: "{{ open_webui_ollama_base_url }}"
       NEMO_GUARDRAILS_OLLAMA_URL: "{{ open_webui_nemo_guardrails_ollama_url }}"
       WEBUI_SECRET_KEY: "{{ open_webui_secret_key }}"
+ {% if open_webui_langfuse_enable | bool %}
+      # --- Langfuse tracing ---
+      LANGFUSE_PUBLIC_KEY: "{{ open_webui_langfuse_public_key }}"
+      LANGFUSE_SECRET_KEY: "{{ open_webui_langfuse_secret_key }}"
+      LANGFUSE_HOST: "{{ open_webui_langfuse_host }}"
+{% endif %}
     volumes:
       # Volume на хосте, не named-volume — данные лежат рядом
       # с остальной инфраструктурой (на urfu-server в /mnt/sdd).

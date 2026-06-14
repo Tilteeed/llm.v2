@@ -85,6 +85,8 @@
     - open_webui
     - source
 
+
+
 - name: Check that Dockerfile.guardrails exists in cloned repo
   ansible.builtin.stat:
     path: "{{ open_webui_src_dir }}/{{ open_webui_dockerfile }}"
@@ -107,6 +109,33 @@
   tags:
     - open_webui
     - validation
+
+- name: Ensure Open WebUI functions directory exists
+  ansible.builtin.file:
+    path: "{{ open_webui_functions_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: open_webui_langfuse_enable | bool
+  tags:
+    - open_webui
+    - langfuse
+    - functions
+
+- name: Copy Langfuse filter function into Open WebUI data directory
+  ansible.builtin.copy:
+    src: "{{ open_webui_src_dir }}/functions/langfuse_filter.py"
+    dest: "{{ open_webui_functions_dir }}/langfuse_filter.py"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: open_webui_langfuse_enable | bool
+  tags:
+    - open_webui
+    - langfuse
+    - functions
 
 - name: Check whether shared Docker network exists
   ansible.builtin.command:
